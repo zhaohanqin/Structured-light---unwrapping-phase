@@ -4,11 +4,6 @@
 
 本项目是一个基于"互补格雷码+四步相移码"方法的单目结构光三维重建系统。项目使用DLP投影仪投射结构光图案，通过灰度相机采集图像，然后通过算法处理获得被测物体的三维信息。
 
-### 系统组成
-- **DLP投影仪**: 闻亭PRO6500
-- **灰度相机**: FLIR BFS-U3-50S5  
-- **旋转平台**: 用于多角度采集
-
 ### 算法流程
 1. 生成格雷码图像
 2. 生成四步相移图像
@@ -20,22 +15,17 @@
 ## 项目文件结构
 
 ```
-FourStepPhaseShifting-master/
-├── src/
-│   ├── python/                    # Python版本实现
-│   │   ├── wrapped_phase_algorithm.py      # 包裹相位计算
-│   │   ├── unwrapped_phase_algorithm.py    # 解包裹相位计算
-│   │   ├── generate_graycode_map.py        # 格雷码生成与映射
-│   │   ├── graycode_binarization.py        # 格雷码二值化处理
-│   │   ├── generate_phase-shifting_map.py  # 相移图案生成
-│   │   ├── gray_code.py                    # 简化版格雷码实现
-│   │   ├── simplified_GrayCode_map.py      # 简化版格雷码映射
-│   │   ├── phase_differences_map.py        # 相位差计算
-│   │   └── 格雷光栅码值.txt                # 格雷码码值存储
-│   └── matlab/                    # MATLAB版本实现
-├── images/                        # 实验图片和结果
-├── support/                       # 支持文档
-└── README.md                      # 项目说明文档
+python版本的项目的结构
+├── python/                    # Python版本实现
+│   ├── wrapped_phase_algorithm.py      # 包裹相位计算
+│   ├── unwrapped_phase_algorithm.py    # 解包裹相位计算
+│   ├── generate_graycode_map.py        # 格雷码生成与映射
+│   ├── graycode_binarization.py        # 格雷码二值化处理
+│   ├── generate_phase-shifting_map.py  # 相移图案生成
+│   ├── gray_code.py                    # 简化版格雷码实现
+│   ├── simplified_GrayCode_map.py      # 简化版格雷码映射
+│   ├── phase_differences_map.py        # 相位差计算
+│   └── 格雷光栅码值.txt                # 格雷码码值存储
 ```
 
 ## 核心功能模块分析
