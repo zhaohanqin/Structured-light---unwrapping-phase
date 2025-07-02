@@ -1,194 +1,409 @@
-# 四步相移结构光三维重建项目结构分析
+# 相位解包裹程序用户手册
 
-## 项目概述
+## 1. 概述
 
-本项目是一个基于"互补格雷码+四步相移码"方法的单目结构光三维重建系统。项目使用DLP投影仪投射结构光图案，通过灰度相机采集图像，然后通过算法处理获得被测物体的三维信息。
+本文档提供了相位解包裹程序的详细使用说明，包括独立版本(`unwrapped_phase_standalone.py`)和用户界面版本(`unwrapped_phase_ui.py`)。这两个程序用于处理四步相移图像和格雷码图像，计算解包裹相位，并可视化结果。
 
-### 算法流程
-1. 生成格雷码图像
-2. 生成四步相移图像
-3. 求解相对相位
-4. 求解绝对相位
-5. 获得相机-投影仪像素坐标之间的对应关系
-6. 根据标定参数获得重建点云信息
+### 主要功能
 
-## 项目文件结构
+- 四步相移法计算包裹相位
+- 格雷码辅助的相位解包裹
+- 相位质量评估和改进
+- 相位跳变检测和修复
+- 支持水平和垂直方向解包裹
+- 多种可视化方式展示结果
+
+## 2. 安装要求
+
+### 2.1 依赖库
+
+程序依赖以下Python库：
+
+- numpy
+- opencv-python (cv2)
+- PySide6 (仅UI版本需要)
+
+可以通过以下命令安装：
+
+```bash
+pip install numpy opencv-python
+pip install PySide6  # 仅UI版本需要
+```
+
+### 2.2 文件结构
+
+程序需要以下目录结构：
 
 ```
-python版本的项目的结构
-├── python/                    # Python版本实现
-│   ├── wrapped_phase_algorithm.py      # 包裹相位计算
-│   ├── unwrapped_phase_algorithm.py    # 解包裹相位计算
-│   ├── generate_graycode_map.py        # 格雷码生成与映射
-│   ├── graycode_binarization.py        # 格雷码二值化处理
-│   ├── generate_phase-shifting_map.py  # 相移图案生成
-│   ├── gray_code.py                    # 简化版格雷码实现
-│   ├── simplified_GrayCode_map.py      # 简化版格雷码映射
-│   ├── phase_differences_map.py        # 相位差计算
-│   └── 格雷光栅码值.txt                # 格雷码码值存储
+├── unwrapped_phase_standalone.py  # 独立版本
+├── unwrapped_phase_ui.py          # UI版本
+├── fringe_patterns/               # 存放四步相移图像
+│   ├── I1.png                     # 水平方向相移图像
+│   ├── I2.png
+│   ├── I3.png
+│   ├── I4.png
+│   ├── I5.png                     # 垂直方向相移图像
+│   ├── I6.png
+│   ├── I7.png
+│   └── I8.png
+├── gray_patterns/                 # 存放格雷码图像
+│   ├── gray_bit_0.png             # 原始格雷码图像
+│   ├── gray_bit_1.png
+│   ├── gray_bit_2.png
+│   ├── gray_bit_3.png
+│   ├── gray_bit_4.png
+│   ├── matched_binary_0.png       # 二值化格雷码图像
+│   ├── matched_binary_1.png
+│   ├── matched_binary_2.png
+│   ├── matched_binary_3.png
+│   └── matched_binary_4.png
+└── results/                       # 结果保存目录(自动创建)
 ```
 
-## 核心功能模块分析
+## 3. 独立版本使用说明 (unwrapped_phase_standalone.py)
 
-### 1. 包裹相位计算模块 (`wrapped_phase_algorithm.py`)
+### 3.1 程序启动
 
-**主要类**: `WrappedPhase`
+直接运行Python脚本即可启动独立版本：
 
-**核心功能**: 计算四步相移法得到的包裹相位
+```bash
+python unwrapped_phase_standalone.py
+```
 
-**主要函数**:
-- `getImageData(m=4)`: 获取相机拍摄的n幅相移图
-- `computeWrappedphase(I, width=1280, height=720)`: 计算包裹相位
-  - 输入: 4幅相移图像
-  - 输出: 包裹相位矩阵
-  - 算法: 四步相移法，根据四个象限的不同情况计算相位
+### 3.2 使用步骤
 
-**算法特点**:
-- 处理四个特殊位置（边界情况）
-- 根据四个象限分别计算相位
-- 输出相位范围: [0, 2π]
+1. **选择显示选项**：
+   - 选项1：仅显示最终结果
+   - 选项2：显示关键中间过程（格雷码、四步相移图、K1/K2矩阵）
+   - 选项3：显示所有处理过程（包括跳变检测、质量评估等）
 
-### 2. 解包裹相位计算模块 (`unwrapped_phase_algorithm.py`)
+2. **选择解包裹方向**：
+   - 选项1：仅水平方向解包裹（使用I1-I4图像）
+   - 选项2：仅垂直方向解包裹（使用I5-I8图像）
+   - 选项3：水平和垂直方向解包裹并组合（默认）
 
-**主要类**: `UnwrappedPhase`
+3. **选择图像尺寸标准化方法**：
+   - 选项1：自动裁剪到最小尺寸（默认）
+   - 选项2：缩放所有图像到相同尺寸
+   - 选项3：手动指定目标尺寸
 
-**核心功能**: 将包裹相位解包裹得到绝对相位
+4. **查看结果**：
+   - 程序将显示解包裹相位图像和其他可视化结果
+   - 鼠标点击图像可显示该点的相位值
+   - 按's'键保存图像
+   - 按'q'键或ESC键退出
 
-**主要函数**:
-- `getBinarizedGrayCodes(m=5)`: 获得二值化后的格雷码图像
-- `get_k1_k2()`: 获得k1和k2矩阵（格雷码解码）
-- `computeUnwrappedPhase()`: 计算解包裹相位
-- `showUnwrappedPhase()`: 显示解包裹相位
+5. **结果文件**：
+   - 所有结果都保存在results目录中
+   - 文件命名基于所选的解包裹方向和处理类型
 
-**算法特点**:
-- 使用格雷码辅助解包裹
-- 根据包裹相位的不同区间选择不同的解包裹策略
-- 最终得到连续的绝对相位
+### 3.3 测试数据生成
 
-### 3. 格雷码生成与映射模块 (`generate_graycode_map.py`)
+如果没有提供图像，程序会自动生成测试数据：
 
-**主要类**: `GrayCode`
+```python
+u = UnwrappedPhase()
+u.generate_test_patterns()
+```
 
-**核心功能**: 生成格雷码图案和建立编码映射关系
+### 3.4 主要函数及功能
 
-**主要函数**:
-- `__createGrayCode(n)`: 生成n位格雷码
-- `__formCodes(n)`: 生成codes矩阵
-- `toPattern(idx, cols=1920, rows=1080)`: 生成格雷码光栅图
-- `__code2k(k)`: 将k映射到对应的格雷码
-- `__k2v(k)`: 将k映射为v（十进制值）
-- `store_gray_code_map_value()`: 存储格雷码映射值
+| 类/函数 | 描述 |
+|---------|------|
+| `normalize_image_size()` | 将一组图像标准化为相同尺寸，支持裁剪和缩放方法 |
+| `GrayCode` 类 | 实现格雷码的生成、编码和解码功能 |
+| `WrappedPhase` 类 | 实现四步相移法计算包裹相位的核心算法 |
+| `Binariization` 类 | 处理格雷码图像的二值化 |
+| `UnwrappedPhase` 类 | 实现相位解包裹的核心功能 |
+| `computeUnwrappedPhase()` | 主要处理函数，计算解包裹相位 |
+| `phase_unwrapping_with_continuity()` | 添加相位连续性约束的解包裹算法 |
+| `estimate_phase_quality()` | 通过计算调制度评估相位质量 |
+| `visualize_phase_jumps()` | 检测和可视化相位跳变区域 |
+| `smooth_unwrapped_phase()` | 结合中值和高斯滤波进行相位平滑 |
+| `optimize_phase_jumps()` | 优化相位跳变区域 |
+| `combine_horizontal_vertical_phases()` | 组合水平和垂直方向的解包裹相位 |
+| `get_k1_k2()` | 获取解包裹所需的k1和k2矩阵 |
 
-**数据结构**:
-- `codes`: 格雷码矩阵
-- `code2k`: 格雷码到索引的映射字典
-- `k2v`: 索引到十进制值的映射字典
-- `v2k`: 十进制值到索引的映射字典
+## 4. UI版本使用说明 (unwrapped_phase_ui.py)
 
-### 4. 格雷码二值化处理模块 (`graycode_binarization.py`)
+### 4.1 程序启动
 
-**主要类**: `Binariization`
+直接运行Python脚本即可启动UI版本：
 
-**核心功能**: 将格雷码图像进行二值化处理
+```bash
+python unwrapped_phase_ui.py
+```
 
-**主要函数**:
-- `get_threshold(m=4)`: 利用四幅相移图计算阈值
-- `get_GC_images()`: 读取格雷码图片
-- `getBinaryGrayCode()`: 将格雷码图像二值化处理
+### 4.2 界面说明
 
-**算法特点**:
-- 使用相移图像的平均值作为阈值
-- 对格雷码图像进行二值化处理
-- 输出二值化的格雷码图像
+UI界面包含以下主要区域：
 
-### 5. 相移图案生成模块 (`generate_phase-shifting_map.py`)
+1. **控制面板**：
+   - 文件夹选择区域
+   - 解包裹方向选择
+   - 显示模式选择
+   - 图像尺寸标准化选项
+   - 进度信息显示
 
-**主要类**: `PhaseShiftingCode`
+2. **图像显示区**：
+   - 相位图像显示
+   - 鼠标交互功能
 
-**核心功能**: 生成四步相移图案
+3. **信息面板**：
+   - 相位数据统计
+   - 文件信息
+   - 操作按钮
 
-**主要函数**:
-- `toPhasePattern(j, freq=16, width=1920, height=1080)`: 生成相移图案
-  - 输入: 相移步数j，频率freq，图像尺寸
-  - 输出: 相移图案
-  - 公式: I = 128 + 127 * cos(2π * (i * freq / width + j/n))
+### 4.3 使用步骤
 
-### 6. 简化版格雷码模块
+1. **选择解包裹方向**：
+   - 在"解包裹方向"下拉框中选择需要的方向：
+     - 水平方向：仅使用I1-I4图像
+     - 垂直方向：仅使用I5-I8图像
+     - 水平+垂直组合：使用I1-I8图像，并组合结果
 
-#### `gray_code.py`
-- 简化版的格雷码实现
-- 包含基本的格雷码生成和图案生成功能
+2. **选择图像文件夹**：
+   - 点击"选择文件夹"按钮，选择包含四步相移图像的文件夹
+   - 程序会检查文件夹中是否有足够的图像文件
+   - 对于垂直方向或组合模式，需要至少8个图像文件
 
-#### `simplified_GrayCode_map.py`
-- 在基础格雷码基础上增加了黑场和白场
-- 用于系统标定和图像预处理
+3. **设置图像尺寸标准化选项**：
+   - 在"图像尺寸标准化"区域选择合适的方法：
+     - 自动裁剪到最小尺寸
+     - 缩放到相同尺寸
+     - 手动指定目标尺寸
 
-## 主要功能函数总结
+4. **开始处理**：
+   - 点击"开始处理"按钮
+   - 处理过程中，进度信息会显示在下方
+   - 处理完成后，结果会自动显示在图像区域
 
-### 相位计算相关
-1. **`WrappedPhase.computeWrappedphase()`** - 四步相移包裹相位计算
-2. **`UnwrappedPhase.computeUnwrappedPhase()`** - 格雷码辅助解包裹
-3. **`UnwrappedPhase.get_k1_k2()`** - 格雷码解码得到k1、k2矩阵
+5. **查看结果**：
+   - 使用"显示模式"下拉框切换不同的显示方式：
+     - 彩色相位图
+     - 灰度相位图
+     - 直方图均衡化相位图
+     - 包裹相位图
+     - K1矩阵图
+     - K2矩阵图
+   - 如果选择的是组合模式，还可以查看：
+     - 水平方向解包裹相位图
+     - 垂直方向解包裹相位图
 
-### 图案生成相关
-4. **`GrayCode.toPattern()`** - 格雷码图案生成
-5. **`PhaseShiftingCode.toPhasePattern()`** - 相移图案生成
-6. **`GrayCode.__createGrayCode()`** - 格雷码序列生成
+6. **交互操作**：
+   - 鼠标悬停在图像上可在状态栏显示相位值
+   - 鼠标点击图像会在图像上标记该点并显示相位值
+   - 在组合模式下，会同时显示水平和垂直方向的相位值
 
-### 图像处理相关
-7. **`Binariization.getBinaryGrayCode()`** - 格雷码图像二值化
-8. **`Binariization.get_threshold()`** - 阈值计算
-9. **`WrappedPhase.getImageData()`** - 图像数据读取
+7. **保存结果**：
+   - 所有结果自动保存在results目录中
+   - 可以点击"保存当前视图"按钮保存当前显示的图像
 
-### 数据映射相关
-10. **`GrayCode.__code2k()`** - 格雷码到索引映射
-11. **`GrayCode.__k2v()`** - 索引到十进制值映射
-12. **`GrayCode.store_gray_code_map_value()`** - 映射关系存储
+### 4.4 主要类及功能
 
-## 算法流程详解
+| 类/函数 | 描述 |
+|---------|------|
+| `UnwrappedPhaseApp` 类 | 主应用程序窗口类 |
+| `ProcessingThread` 类 | 工作线程，避免UI冻结 |
+| `CustomUnwrappedPhase` 类 | 继承自独立版本的UnwrappedPhase类，添加进度信号和UI交互 |
+| `PhaseImageLabel` 类 | 自定义图像标签，支持鼠标交互和相位值显示 |
+| `create_control_panel()` | 创建控制面板UI |
+| `create_display_area()` | 创建图像显示区UI |
+| `select_folder()` | 选择四步相移图像文件夹 |
+| `start_processing()` | 开始处理流程 |
+| `update_display()` | 更新图像显示 |
+| `display_image()` | 将OpenCV图像显示在界面上 |
+| `on_direction_changed()` | 当方向选择改变时更新显示选项 |
+| `process_completed()` | 处理完成后的操作 |
+| `get_fringe_images()` | 获取四步相移图像 |
+| `compute_wrapped_phase()` | 计算包裹相位 |
+| `compute_unwrapped_phase()` | 计算解包裹相位(改进版) |
+| `save_unwrapped_phase_results()` | 保存解包裹相位结果 |
+| `estimate_phase_quality()` | 估计相位质量 |
+| `visualize_phase_jumps()` | 可视化相位跳变区域 |
+| `smooth_unwrapped_phase()` | 对解包裹相位进行平滑处理 |
+| `optimize_phase_jumps()` | 进一步优化相位跳变区域 |
+| `combine_horizontal_vertical_phases()` | 组合水平和垂直方向的解包裹相位 |
 
-### 1. 数据采集阶段
-- 投影格雷码图案（5幅）
-- 投影相移图案（4幅）
-- 相机同步采集图像
+## 5. 关键算法说明
 
-### 2. 相位计算阶段
-- 使用四步相移法计算包裹相位
-- 处理边界情况和象限判断
-- 输出范围在[0, 2π]的包裹相位
+### 5.1 四步相移法
 
-### 3. 格雷码解码阶段
-- 对格雷码图像进行二值化处理
-- 解码得到k1、k2矩阵
-- 建立像素坐标到条纹序号的映射
+四步相移法通过四幅具有固定相移量的图像计算包裹相位：
 
-### 4. 相位解包裹阶段
-- 结合包裹相位和格雷码信息
-- 根据相位区间选择解包裹策略
-- 得到连续的绝对相位
+```
+I₀(x,y) = A(x,y) + B(x,y)·cos[φ(x,y)]
+I₁(x,y) = A(x,y) + B(x,y)·cos[φ(x,y) + π/2]
+I₂(x,y) = A(x,y) + B(x,y)·cos[φ(x,y) + π]
+I₃(x,y) = A(x,y) + B(x,y)·cos[φ(x,y) + 3π/2]
+```
 
-### 5. 三维重建阶段
-- 根据绝对相位计算深度信息
-- 结合系统标定参数
-- 生成三维点云数据
+包裹相位计算公式：
+```
+φ(x,y) = arctan[(I₃(x,y) - I₁(x,y)) / (I₀(x,y) - I₂(x,y))]
+```
 
-## 技术特点
+### 5.2 格雷码辅助解包裹
 
-1. **互补格雷码**: 提高解码精度和鲁棒性
-2. **四步相移**: 标准的结构光相位计算方法
-3. **模块化设计**: 各功能模块独立，便于维护和扩展
-4. **Python实现**: 便于算法验证和快速原型开发
+格雷码是一种二进制编码，相邻数值之间只有一位二进制数不同。程序使用格雷码辅助确定相位周期数：
 
-## 应用场景
+1. 生成n位格雷码图案
+2. 对格雷码图像进行二值化处理
+3. 解码二值化格雷码图像得到k1和k2矩阵
+4. 使用k1和k2确定每个像素点所处的条纹周期
+5. 结合包裹相位和周期信息计算解包裹相位
 
-- 工业三维测量
-- 逆向工程
-- 质量检测
-- 机器人视觉
-- 文化遗产数字化
+### 5.3 相位质量评估
 
-## 参考文献
+通过计算调制度(modulation)评估相位质量：
 
-[1] Zhang Q, Su X, Xiang L, et al. 3-D shape measurement based on complementary Gray-code light[J]. Optics and Lasers in Engineering, 2012, 50(4): 574-579.
+```
+modulation = sqrt((I₃-I₁)² + (I₀-I₂)²) / (I₀+I₁+I₂+I₃)
+```
 
-[2] 张启灿, 吴周杰. 基于格雷码图案投影的结构光三维成像技术[J]. 红外与激光工程, 2020, 49(3): 0303004-1-0303004-13. 
+### 5.4 相位跳变检测与优化
+
+1. 计算相位梯度，识别梯度异常大的区域为跳变点
+2. 对跳变点，考虑其周围高质量区域的相位值
+3. 使用质量加权平均计算新的相位值
+4. 应用中值滤波进一步平滑跳变区域
+
+### 5.5 水平和垂直相位组合
+
+1. 分别计算水平和垂直方向的解包裹相位
+2. 计算相位梯度，确定权重
+3. 使用加权组合生成最终相位
+4. 应用平滑处理改善结果
+
+## 6. 常见问题解答
+
+### 6.1 图像数量不足
+
+- **问题**：程序提示"文件夹中只有X个图像文件，需要至少4个"
+- **解决方法**：确保fringe_patterns文件夹中至少有4个相移图像(I1-I4)。对于垂直方向或组合模式，需要8个图像(I1-I8)。
+
+### 6.2 图像尺寸不一致
+
+- **问题**：程序提示"包裹相位和k1、k2的尺寸不一致"
+- **解决方法**：使用图像尺寸标准化功能，选择"自动裁剪到最小尺寸"或"缩放到相同尺寸"。
+
+### 6.3 相位跳变严重
+
+- **问题**：解包裹相位中有明显的跳变和不连续
+- **解决方法**：
+  - 增大平滑核尺寸(默认为5)
+  - 调整相位跳变检测阈值(默认为0.5)
+  - 确保格雷码图像清晰且正确曝光
+
+### 6.4 无法选择解包裹方向
+
+- **问题**：UI版本中方向选择下拉框被禁用
+- **解决方法**：确保界面初始化正确，使用最新版本的程序。现在的版本支持在选择文件夹前直接选择解包裹方向。
+
+### 6.5 相位图像模糊或不清晰
+
+- **问题**：生成的相位图像模糊或质量较低
+- **解决方法**：
+  - 确保输入图像质量高，光照均匀
+  - 尝试使用不同的尺寸标准化方法
+  - 调整平滑参数，减少过度平滑
+  - 使用直方图均衡化模式查看以增强对比度
+
+## 7. 高级用法
+
+### 7.1 自定义图像处理参数
+
+独立版本可以通过修改源代码自定义参数：
+
+```python
+# 示例：修改平滑核大小
+smoothed_pha = self.smooth_unwrapped_phase(unwrapped_pha, kernel_size=7)  # 默认为5
+
+# 示例：修改跳变检测阈值
+jumps = self.visualize_phase_jumps(unwrapped_pha, threshold=0.3)  # 默认为0.5
+```
+
+### 7.2 集成到其他项目
+
+可以将相位解包裹算法集成到其他项目中：
+
+```python
+from unwrapped_phase_standalone import UnwrappedPhase
+
+# 创建解包裹相位计算器实例
+unwrapper = UnwrappedPhase()
+
+# 自定义图像处理参数
+unwrapper.standard_size = (480, 640)  # 设置标准尺寸
+unwrapper.size_method = "resize"      # 设置尺寸调整方法
+
+# 计算解包裹相位
+unwrapped_phase = unwrapper.computeUnwrappedPhase(
+    show_details=False,
+    direction="horizontal"
+)
+
+# 使用解包裹相位进行进一步处理
+# ...
+```
+
+### 7.3 自定义可视化
+
+可以根据需要修改可视化方式：
+
+```python
+# 将相位值缩放到[0,255]范围
+scaled = (unwrapped_phase * 255 / np.max(unwrapped_phase)).astype(np.uint8)
+
+# 应用不同的颜色映射
+# COLORMAP_JET - 默认，彩虹色
+# COLORMAP_VIRIDIS - 改进的彩虹色，更好的感知均匀性
+# COLORMAP_INFERNO - 黑到黄的热力图
+# COLORMAP_PLASMA - 深紫到黄
+color_map = cv.applyColorMap(scaled, cv.COLORMAP_VIRIDIS)
+```
+
+## 8. 附录
+
+### 8.1 相位解包裹的数学原理
+
+包裹相位的范围被限制在[0, 2π)，而实际相位可能跨越多个周期：
+
+```
+Φ(x,y) = φ(x,y) + 2πk(x,y)
+```
+
+其中:
+- Φ(x,y)是解包裹相位（绝对相位）
+- φ(x,y)是包裹相位（范围在[0, 2π)）
+- k(x,y)是整数周期数
+
+格雷码辅助方法通过额外的二进制编码图案确定k(x,y)的值。
+
+### 8.2 输入图像要求
+
+- **四步相移图像**：相移量分别为0, π/2, π, 3π/2
+- **格雷码图像**：通常使用5位格雷码，共需要5幅图像
+- **图像格式**：支持PNG, JPG, BMP, TIF等常见格式
+- **图像尺寸**：推荐分辨率不低于640x480
+- **文件命名**：水平方向I1-I4，垂直方向I5-I8
+
+### 8.3 结果文件说明
+
+| 文件名 | 描述 |
+|--------|------|
+| `*_unwrapped_phase_original.png` | 原始缩放的解包裹相位图 |
+| `*_unwrapped_phase_color.png` | 应用伪彩色映射的解包裹相位图 |
+| `*_unwrapped_phase_equalized.png` | 直方图均衡化后的解包裹相位图 |
+| `*_unwrapped_phase_height.png` | 用于3D可视化的高度图 |
+| `phase_quality.png` | 相位质量图(调制度) |
+| `phase_jumps_binary.png` | 二值化的相位跳变图 |
+| `phase_jumps_color.png` | 彩色的相位跳变图 |
+| `phase_with_jumps.png` | 叠加跳变区域的相位图 |
+| `optimization_difference.png` | 优化前后的差异图 |
+| `optimized_phase.png` | 优化后的相位图 |
+| `phase_distribution_map.png` | 二维相位分布图(组合模式) |
+| `phase_contour_map.png` | 相位等值线图(组合模式) |
+| `phase_3d_distribution.png` | 3D相位分布图(组合模式) |
+
+其中，文件名前缀为`horizontal_`、`vertical_`或`combined_`，分别表示水平方向、垂直方向或组合模式的结果。 
