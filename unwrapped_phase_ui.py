@@ -11,7 +11,7 @@ from PySide6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont, QIcon,
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QPropertyAnimation, QEasingCurve, Property
 
 # 导入解相位算法
-from unwrapped_phase_standalone import UnwrappedPhase, WrappedPhase, GrayCode
+from unwrapped_phase import UnwrappedPhase, WrappedPhase, GrayCode
 
 # 设置应用全局样式
 def set_app_style(app):
@@ -435,7 +435,7 @@ class CustomUnwrappedPhase(UnwrappedPhase):
                 raise
                 
         # 标准化所有图像的尺寸
-        from unwrapped_phase_standalone import normalize_image_size
+        from unwrapped_phase import normalize_image_size
         I = normalize_image_size(I, self.standard_size, self.size_method)
         if len(I) > 0 and I[0] is not None:
             self.emit_progress(f"相移图像尺寸: {I[0].shape[0]}x{I[0].shape[1]} ({direction}方向)")

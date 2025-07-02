@@ -407,3 +407,350 @@ color_map = cv.applyColorMap(scaled, cv.COLORMAP_VIRIDIS)
 | `phase_3d_distribution.png` | 3D相位分布图(组合模式) |
 
 其中，文件名前缀为`horizontal_`、`vertical_`或`combined_`，分别表示水平方向、垂直方向或组合模式的结果。 
+
+## 9. 详细集成指南
+
+本节提供了如何将相位解包裹模块集成到其他项目中的详细说明。
+
+### 9.1 基本集成方法
+
+#### 9.1.1 导入相关类
+
+您可以根据需要导入以下类：
+
+```python
+# 导入独立版本的核心类
+from unwrapped_phase import UnwrappedPhase, WrappedPhase, GrayCode, Binariization
+
+# 或者导入UI版本的增强类
+from unwrapped_phase_ui import CustomUnwrappedPhase
+```
+
+#### 9.1.2 简单集成示例
+
+下面是一个基本的集成示例：
+
+```python
+import numpy as np
+import cv2 as cv
+from unwrapped_phase import UnwrappedPhase
+
+# 创建解包裹相位计算器实例
+unwrapper = UnwrappedPhase(direction="horizontal")  # 或 "vertical", "both"
+
+# 计算解包裹相位
+unwrapped_phase = unwrapper.computeUnwrappedPhase(
+    show_details=False,  # 不显示中间过程图像
+    direction="horizontal",  # 指定解包裹方向
+    standard_size=None,  # 自动计算标准尺寸，也可指定如(480, 640)
+    size_method="crop"   # 尺寸调整方法，可选"crop"或"resize"
+)
+
+# 使用解包裹相位进行进一步处理
+# 例如：保存为伪彩色图像
+scaled = (unwrapped_phase * 255 / np.max(unwrapped_phase)).astype(np.uint8)
+color_map = cv.applyColorMap(scaled, cv.COLORMAP_JET)
+cv.imwrite("integrated_result.png", color_map)
+```
+
+### 9.2 必要的准备工作
+
+在集成相位解包裹模块前，需要做以下准备工作：
+
+#### 9.2.1 目录结构准备
+
+程序期望有特定的目录结构。在您的项目中，应创建以下目录：
+
+```
+your_project/
+├── fringe_patterns/  # 存放四步相移图像
+├── gray_patterns/    # 存放格雷码图像
+└── results/          # 结果保存目录(会自动创建)
+```
+
+或者，您可以在代码中手动指定图像路径。
+
+#### 9.2.2 图像准备
+
+您需要准备以下图像：
+
+1. **四步相移图像**
+   - 水平方向：I1.png, I2.png, I3.png, I4.png
+   - 垂直方向：I5.png, I6.png, I7.png, I8.png
+   - 相移量分别为0, π/2, π, 3π/2
+
+2. **格雷码图像**
+   - 原始格雷码：gray_bit_0.png, gray_bit_1.png, ..., gray_bit_4.png
+   - 二值化格雷码：matched_binary_0.png, matched_binary_1.png, ..., matched_binary_4.png
+
+如果没有现成的图像，可以使用`generate_test_patterns()`方法生成测试图像：
+
+```python
+unwrapper = UnwrappedPhase()
+unwrapper.generate_test_patterns()  # 生成测试图像
+```
+
+### 9.3 重要参数说明
+
+#### 9.3.1 UnwrappedPhase类初始化参数
+
+```python
+unwrapper = UnwrappedPhase(
+    n=5,                # 格雷码位数，默认为5
+    direction="horizontal"  # 条纹方向，可选"horizontal"、"vertical"或"both"
+)
+```
+
+#### 9.3.2 computeUnwrappedPhase方法参数
+
+```python
+unwrapped_phase = unwrapper.computeUnwrappedPhase(
+    show_details=False,      # 是否显示中间过程
+    direction=None,          # 解包裹方向，覆盖初始化时的设置
+    standard_size=None,      # 标准图像尺寸(height, width)
+    size_method="crop"       # 尺寸调整方法，"crop"或"resize"
+)
+```
+
+#### 9.3.3 其他常用参数
+
+- **相位质量评估**：`estimate_phase_quality`方法中的`show_details`参数控制是否显示质量图
+- **相位跳变检测**：`visualize_phase_jumps`方法中的`threshold`参数控制跳变检测灵敏度
+- **相位平滑**：`smooth_unwrapped_phase`方法中的`kernel_size`参数控制平滑强度
+
+### 9.4 高级集成示例
+
+#### 9.4.1 自定义工作流集成
+
+以下示例展示了如何创建自定义的相位解包裹工作流：
+
+```python
+import numpy as np
+import cv2 as cv
+from unwrapped_phase import UnwrappedPhase, WrappedPhase, Binariization
+
+# 创建所需的实例
+wrapped_phase = WrappedPhase()
+binarizer = Binariization()
+unwrapper = UnwrappedPhase()
+
+# 步骤1: 加载相移图像
+fringe_images = wrapped_phase.getImageData(
+    m=4,                # 相移图像数量
+    direction="horizontal",  # 条纹方向
+    standard_size=(480, 640),  # 标准尺寸
+    size_method="resize"  # 尺寸调整方法
+)
+
+# 步骤2: 计算包裹相位
+wrapped_pha = wrapped_phase.computeWrappedphase(fringe_images)
+
+# 步骤3: 二值化格雷码图像
+binary_graycodes = binarizer.getBinaryGrayCode(
+    standard_size=(480, 640),
+    size_method="resize"
+)
+
+# 步骤4: 获取K1和K2矩阵
+unwrapper.standard_size = (480, 640)
+unwrapper.size_method = "resize"
+k1, k2 = unwrapper.get_k1_k2()
+
+# 步骤5: 使用相位连续性约束的解包裹算法
+unwrapped_pha = unwrapper.phase_unwrapping_with_continuity(wrapped_pha, k1, k2)
+
+# 步骤6: 评估相位质量
+quality = unwrapper.estimate_phase_quality(fringe_images, show_details=False)
+
+# 步骤7: 检测相位跳变
+jumps = unwrapper.visualize_phase_jumps(unwrapped_pha, threshold=0.5, show_details=False)
+
+# 步骤8: 对解包裹相位进行平滑处理
+smoothed_pha = unwrapper.smooth_unwrapped_phase(unwrapped_pha, kernel_size=5)
+
+# 步骤9: 优化相位跳变区域
+final_pha = unwrapper.optimize_phase_jumps(smoothed_pha, jumps, quality, show_details=False)
+
+# 步骤10: 使用解包裹相位进行自定义处理
+# ...
+
+# 保存结果
+final_scaled = (final_pha * 255 / np.max(final_pha)).astype(np.uint8)
+final_color = cv.applyColorMap(final_scaled, cv.COLORMAP_JET)
+cv.imwrite("custom_workflow_result.png", final_color)
+```
+
+#### 9.4.2 组合水平和垂直方向相位
+
+以下示例展示了如何手动组合水平和垂直方向的解包裹相位：
+
+```python
+import numpy as np
+from unwrapped_phase import UnwrappedPhase
+
+# 创建解包裹相位计算器实例
+unwrapper = UnwrappedPhase()
+
+# 计算水平方向解包裹相位
+horizontal_phase = unwrapper.computeUnwrappedPhase(
+    show_details=False,
+    direction="horizontal"
+)
+
+# 计算垂直方向解包裹相位
+vertical_phase = unwrapper.computeUnwrappedPhase(
+    show_details=False,
+    direction="vertical"
+)
+
+# 组合两个方向的相位
+combined_visual, combined_data = unwrapper.combine_horizontal_vertical_phases(
+    horizontal_phase, vertical_phase
+)
+
+# 使用组合结果进行后续处理
+# ...
+```
+
+### 9.5 使用CustomUnwrappedPhase类进行集成
+
+UI版本中的`CustomUnwrappedPhase`类增加了进度报告功能，适合需要显示处理进度的应用：
+
+```python
+from PySide6.QtCore import QObject, Signal
+from unwrapped_phase_ui import CustomUnwrappedPhase
+
+class ProgressReporter(QObject):
+    progress_signal = Signal(str)
+    
+    def update_progress(self, message):
+        self.progress_signal.emit(message)
+
+# 创建进度报告器
+reporter = ProgressReporter()
+reporter.progress_signal.connect(lambda msg: print(f"进度: {msg}"))
+
+# 创建增强版解包裹相位计算器
+unwrapper = CustomUnwrappedPhase(
+    progress_signal=reporter.progress_signal,
+    normalization_params={
+        "method": "resize",
+        "target_size": (480, 640)
+    }
+)
+
+# 获取四步相移图像
+fringe_images = unwrapper.get_fringe_images(direction="horizontal")
+
+# 计算包裹相位
+wrapped_phase = unwrapper.compute_wrapped_phase(fringe_images)
+
+# 获取k1和k2矩阵
+k1, k2 = unwrapper.get_k1_k2()
+
+# 计算解包裹相位
+unwrapped_phase = unwrapper.compute_unwrapped_phase(
+    wrapped_phase, k1, k2,
+    save_intermediate=True,
+    quality_analysis=True
+)
+
+# 保存结果
+unwrapper.save_unwrapped_phase_results(unwrapped_phase)
+```
+
+### 9.6 常见集成问题及解决方案
+
+1. **路径问题**：确保在集成环境中正确设置相对路径
+   ```python
+   import os
+   # 修改工作目录
+   os.chdir('/path/to/your/project')
+   ```
+
+2. **内存管理**：处理大尺寸图像时，注意内存使用
+   ```python
+   # 使用较小的标准尺寸
+   unwrapper.standard_size = (240, 320)  # 较小的分辨率
+   ```
+
+3. **自定义图像路径**：修改图像加载逻辑
+   ```python
+   def get_custom_images(custom_path):
+       images = []
+       for i in range(4):
+           img = cv.imread(f"{custom_path}/image_{i}.png", -1)
+           images.append(img)
+       return images
+       
+   # 使用自定义图像
+   fringe_images = get_custom_images("/path/to/custom/images")
+   wrapped_phase = wrapped_phase.computeWrappedphase(fringe_images)
+   ```
+
+4. **错误处理**：添加异常处理机制
+   ```python
+   try:
+       unwrapped_phase = unwrapper.computeUnwrappedPhase()
+   except Exception as e:
+       print(f"相位解包裹失败: {e}")
+       # 使用备用方法或默认值
+   ```
+
+5. **进度监控**：在长时间处理时监控进度
+   ```python
+   # 使用CustomUnwrappedPhase类和进度信号
+   # 或添加自定义回调函数
+   ```
+
+### 9.7 性能优化建议
+
+1. **图像尺寸控制**：使用较小的标准尺寸加快处理速度
+   ```python
+   unwrapper.standard_size = (240, 320)  # 较小的尺寸
+   ```
+
+2. **禁用不必要的功能**：
+   ```python
+   # 禁用质量评估和跳变检测可提高性能
+   unwrapped_phase = unwrapper.phase_unwrapping_with_continuity(wrapped_pha, k1, k2)
+   # 直接应用简单平滑
+   smoothed_pha = cv.GaussianBlur(unwrapped_phase, (5, 5), 0)
+   ```
+
+3. **多核处理**：
+   ```python
+   # 对于大型项目，可考虑使用multiprocessing进行并行处理
+   import multiprocessing as mp
+   
+   def process_region(region_data):
+       # 处理图像区域的代码
+       return result
+   
+   # 将图像分割为多个区域
+   regions = [unwrapped_phase[i:i+100, :] for i in range(0, unwrapped_phase.shape[0], 100)]
+   
+   # 使用多进程处理
+   with mp.Pool() as pool:
+       results = pool.map(process_region, regions)
+   
+   # 合并结果
+   # ...
+   ```
+
+4. **GPU加速**：
+   ```python
+   # 对于支持CUDA的环境，可使用GPU加速OpenCV函数
+   # 确保使用的是启用CUDA的OpenCV版本
+   ```
+
+### 9.8 集成最佳实践
+
+1. **模块化设计**：将相位解包裹功能封装为独立模块
+2. **参数配置文件**：使用配置文件管理解包裹参数
+3. **结果缓存**：缓存中间结果以避免重复计算
+4. **错误日志**：实现详细的错误日志记录
+5. **单元测试**：为集成的功能编写测试用例
+6. **文档**：为集成的相位解包裹模块提供详细文档
+
+通过遵循这些指南，您可以将相位解包裹模块无缝集成到各种3D重建、形变测量、光学计量等应用中。 
