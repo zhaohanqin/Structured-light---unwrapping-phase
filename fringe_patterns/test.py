@@ -12,7 +12,7 @@ Im = 127.5         # 亮度振幅（范围 0~127.5）
 f = 10 / height    # 条纹频率（每图像有10条波）
 
 # 输出文件夹
-output_dir = "vertical_phase_shift_patterns"
+output_dir = "fringe_patterns"
 os.makedirs(output_dir, exist_ok=True)
 
 # 四步相移的相位值

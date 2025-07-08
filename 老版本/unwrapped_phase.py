@@ -2,6 +2,7 @@ import numpy as np
 import cv2 as cv
 import math
 import os
+from phase_unwrapper import PhaseUnwrapper
 
 # 添加图像尺寸标准化的工具函数
 def normalize_image_size(images, target_size=None, method="crop"):
@@ -520,7 +521,7 @@ class UnwrappedPhase():
         获得二值化后的格雷码图像
         
         该方法读取已经二值化处理的格雷码图像。如果找不到图像文件，
-        会生成测试用的二值化格雷码图像。二值化格雷码图像是解包裹相位
+        会根据解包裹方向生成相应的测试用格雷码图像。二值化格雷码图像是解包裹相位
         过程中确定条纹周期的关键。
         
         参数:
@@ -530,10 +531,21 @@ class UnwrappedPhase():
             list: 二值化后的格雷码图像列表，每个元素是一个二值化图像（0或1）
         """
         BGC = []
+        # 根据解包裹方向确定要使用的格雷码类型
+        is_vertical_unwrap = (self.direction == "vertical")
+        
+        # 设置基本文件名模式
+        if is_vertical_unwrap:
+            print("准备进行垂直方向解包裹，使用水平条纹格雷码...")
+            base_filename = r"gray_patterns_horizontal\matched_binary_"
+        else:
+            print("准备进行水平方向解包裹，使用垂直条纹格雷码...")
+            base_filename = r"gray_patterns\matched_binary_"
+        
         for i in range(self.n):
             try:
-                # 使用新生成的匹配格雷码图像
-                filename = r"gray_patterns\matched_binary_" + str(i) + ".png"
+                # 尝试读取已有的二值化格雷码图像
+                filename = base_filename + str(i) + ".png"
                 
                 # 尝试直接读取图像
                 img = cv.imread(filename, 0)
@@ -546,16 +558,40 @@ class UnwrappedPhase():
                     raise FileNotFoundError(f"无法读取图像文件: {filename}")
             except Exception as e:
                 print(f"读取二值化格雷码图像 {filename} 失败: {e}")
-                print("生成测试格雷码图像...")
+                print(f"生成{'水平' if is_vertical_unwrap else '垂直'}条纹格雷码测试图像...")
                 
                 # 创建一个格雷码生成器
                 g = GrayCode(self.n)
                 
-                # 生成原始格雷码图案
-                pattern = g.toPattern(i, 640, 480)
+                # 生成合适方向的格雷码图案
+                if is_vertical_unwrap:
+                    # 为垂直方向解包裹生成水平条纹格雷码
+                    pattern = np.zeros((480, 640), np.uint8)
+                    row = g.codes[i, :]
+                    per_row = int(480 / len(row))
+                    # 按行填充，创建水平条纹
+                    for j in range(len(row)):
+                        pattern[j * per_row: (j + 1) * per_row, :] = row[j] * 255
+                else:
+                    # 为水平方向解包裹生成垂直条纹格雷码
+                    pattern = g.toPattern(i, 640, 480)
                 
                 # 模拟二值化后的图像
                 _, img = cv.threshold(pattern, 127, 255, cv.THRESH_BINARY)
+                
+                # 保存生成的图像，以便下次使用
+                save_dir = "gray_patterns_horizontal" if is_vertical_unwrap else "gray_patterns"
+                if not os.path.exists(save_dir):
+                    os.makedirs(save_dir)
+                
+                save_filename = os.path.join(save_dir, f"matched_binary_{i}.png")
+                cv.imwrite(save_filename, img)
+                print(f"已生成并保存{('水平' if is_vertical_unwrap else '垂直')}条纹格雷码图像: {save_filename}")
+                
+                # 同时保存原始格雷码图像（非二值化）
+                gray_filename = os.path.join(save_dir, f"gray_bit_{i}.png")
+                cv.imwrite(gray_filename, pattern)
+                print(f"已生成并保存原始{('水平' if is_vertical_unwrap else '垂直')}条纹格雷码图像: {gray_filename}")
             
             # 将像素值从[0,255]归一化到[0,1]范围
             img_scaled = img/255
@@ -569,6 +605,8 @@ class UnwrappedPhase():
         # 打印图像尺寸信息
         if len(BGC) > 0 and BGC[0] is not None:
             print(f"二值化格雷码图像尺寸: {BGC[0].shape[0]}x{BGC[0].shape[1]}")
+            print(f"解包裹方向: {self.direction}")
+            print(f"使用的格雷码类型: {'水平条纹' if is_vertical_unwrap else '垂直条纹'}")
             
             # 更新标准尺寸（如果之前未设置）
             if self.standard_size is None:
@@ -616,8 +654,21 @@ class UnwrappedPhase():
         # 如果没有指定方向，使用初始化时设置的方向
         if direction is None:
             direction = self.direction
+        else:
+            # 如果指定了新方向，更新实例的方向属性
+            self.direction = direction
             
         print(f"\n开始计算{direction}方向上的解包裹相位...")
+        
+        # 检查必要的目录是否存在
+        directories_exist = os.path.exists("fringe_patterns")
+        gray_patterns_dir = "gray_patterns_horizontal" if direction == "vertical" else "gray_patterns"
+        if not os.path.exists(gray_patterns_dir):
+            directories_exist = False
+            
+        if not directories_exist:
+            print(f"警告: 未找到所需的图像目录，将根据解包裹方向生成测试图案")
+            self.generate_test_patterns()
             
         # 创建包裹相位计算器实例
         WP = WrappedPhase()
@@ -1329,7 +1380,7 @@ class UnwrappedPhase():
         当找不到原始图像文件时，该方法会生成用于测试的四步相移图像和格雷码图像。
         这些测试图像模拟了真实的结构光扫描场景，包括：
         - 四步相移条纹图像（相移量分别为0, π/2, π, 3π/2）
-        - 5位格雷码图像
+        - 5位格雷码图像（水平和垂直两个方向）
         - 二值化后的格雷码图像
         
         生成的测试图像保存在相应的目录中，用于后续的相位解包裹处理。
@@ -1340,7 +1391,7 @@ class UnwrappedPhase():
         print("开始生成测试图像...")
         
         # 创建目录
-        for directory in ["fringe_patterns", "gray_patterns", "results"]:
+        for directory in ["fringe_patterns", "gray_patterns", "gray_patterns_horizontal", "results"]:
             if not os.path.exists(directory):
                 os.makedirs(directory)
                 print(f"创建了{directory}目录")
@@ -1355,30 +1406,28 @@ class UnwrappedPhase():
             print(f"使用默认尺寸 {width}x{height} 生成测试图像")
             
         freq = 15  # 空间频率，决定条纹的密度
-        noise_level = 10  # 噪声级别，模拟真实成像的噪声
+        noise_level = 5  # 噪声级别，模拟真实成像的噪声（降低噪声以获得更清晰的条纹）
         
         # 生成相移条纹图案（四步相移法）
         print("生成四步相移条纹图案...")
         x = np.arange(0, width)
         y = np.arange(0, height).reshape(height, 1)
         
-        # 创建一个非平面的对象表面（模拟复杂形状）
-        # 使用二次曲面模拟物体
-        [X, Y] = np.meshgrid(np.linspace(-1, 1, width), np.linspace(-1, 1, height))
-        Z = 0.5 * (X**2 + Y**2) + 0.1 * np.sin(5*X) * np.cos(5*Y)  # 二次曲面加上正弦调制
-        Z = Z / np.max(Z) * 2 * math.pi  # 归一化到[0, 2π]范围
+        # 创建网格，用于生成条纹
+        [X, Y] = np.meshgrid(np.linspace(0, 1, width), np.linspace(0, 1, height))
         
-        # 生成水平方向的四步相移图像 (I1-I4)
-        print("生成水平方向的四步相移图像 (I1-I4)...")
+        # 生成标准的垂直条纹投影图案 (I1-I4)（用于水平方向解包裹）
+        print("生成垂直条纹四步相移图像 (I1-I4)...")
         for i in range(4):
             phase_shift = i * math.pi/2  # 相移量：0, π/2, π, 3π/2
             
-            # 生成带有水平条纹的相位调制图像
-            fringe = 128 + 100 * np.sin(2 * math.pi * freq * X + Z + phase_shift)
+            # 生成纯正弦条纹（垂直条纹，沿X方向变化）- 没有Z表面调制
+            fringe = 128 + 100 * np.sin(2 * math.pi * freq * X + phase_shift)
             
-            # 添加高斯噪声
-            noise = np.random.normal(0, noise_level, fringe.shape)
-            fringe = fringe + noise
+            # 添加极少的高斯噪声（仅用于模拟轻微投影误差）
+            if noise_level > 0:
+                noise = np.random.normal(0, noise_level, fringe.shape)
+                fringe = fringe + noise
             
             # 限制像素值范围到[0, 255]
             fringe = np.clip(fringe, 0, 255).astype(np.uint8)
@@ -1386,19 +1435,20 @@ class UnwrappedPhase():
             # 保存图像
             filename = f"fringe_patterns/I{i+1}.png"
             cv.imwrite(filename, fringe)
-            print(f"生成了水平条纹图像: {filename}")
+            print(f"生成了垂直条纹投影图像: {filename}")
         
-        # 生成垂直方向的四步相移图像 (I5-I8)
-        print("生成垂直方向的四步相移图像 (I5-I8)...")
+        # 生成标准的水平条纹投影图案 (I5-I8)（用于垂直方向解包裹）
+        print("生成水平条纹四步相移图像 (I5-I8)...")
         for i in range(4):
             phase_shift = i * math.pi/2  # 相移量：0, π/2, π, 3π/2
             
-            # 生成带有垂直条纹的相位调制图像
-            fringe = 128 + 100 * np.sin(2 * math.pi * freq * Y + Z + phase_shift)
+            # 生成纯正弦条纹（水平条纹，沿Y方向变化）- 没有Z表面调制
+            fringe = 128 + 100 * np.sin(2 * math.pi * freq * Y + phase_shift)
             
-            # 添加高斯噪声
-            noise = np.random.normal(0, noise_level, fringe.shape)
-            fringe = fringe + noise
+            # 添加极少的高斯噪声（仅用于模拟轻微投影误差）
+            if noise_level > 0:
+                noise = np.random.normal(0, noise_level, fringe.shape)
+                fringe = fringe + noise
             
             # 限制像素值范围到[0, 255]
             fringe = np.clip(fringe, 0, 255).astype(np.uint8)
@@ -1406,14 +1456,42 @@ class UnwrappedPhase():
             # 保存图像
             filename = f"fringe_patterns/I{i+5}.png"
             cv.imwrite(filename, fringe)
-            print(f"生成了垂直条纹图像: {filename}")
+            print(f"生成了水平条纹投影图像: {filename}")
+        
+        # 为了演示目的，额外生成物体表面反射的模拟图像
+        print("额外生成模拟的物体表面反射图像...")
+        # 创建一个非平面的对象表面（模拟复杂形状）
+        Z = 0.5 * (X**2 + Y**2) + 0.1 * np.sin(5*X) * np.cos(5*Y)  # 二次曲面加上正弦调制
+        Z = Z / np.max(Z) * 2 * math.pi  # 归一化到[0, 2π]范围
+        
+        # 保存到单独目录
+        if not os.path.exists("simulated_captured"):
+            os.makedirs("simulated_captured")
             
-        # 生成格雷码图案
-        print("生成格雷码图案...")
+        for i in range(4):
+            phase_shift = i * math.pi/2
+            # 垂直条纹在物体表面的反射（水平解包裹）
+            reflected = 128 + 70 * np.sin(2 * math.pi * freq * X + Z + phase_shift)
+            noise = np.random.normal(0, 10, reflected.shape)
+            reflected = np.clip(reflected + noise, 0, 255).astype(np.uint8)
+            cv.imwrite(f"simulated_captured/reflected_vertical_{i+1}.png", reflected)
+            
+            # 水平条纹在物体表面的反射（垂直解包裹）
+            reflected = 128 + 70 * np.sin(2 * math.pi * freq * Y + Z + phase_shift)
+            noise = np.random.normal(0, 10, reflected.shape)
+            reflected = np.clip(reflected + noise, 0, 255).astype(np.uint8)
+            cv.imwrite(f"simulated_captured/reflected_horizontal_{i+1}.png", reflected)
+        
+        # 确定当前的解包裹方向
+        current_direction = self.direction
+        print(f"当前解包裹方向: {current_direction}")
+        
+        # 生成垂直条纹格雷码图案（用于水平方向解包裹）
+        print("生成垂直条纹格雷码图案（用于水平方向解包裹）...")
         g = GrayCode(5)  # 创建5位格雷码生成器
         
         for i in range(5):
-            # 生成原始格雷码图案
+            # 生成垂直条纹格雷码图案
             pattern = g.toPattern(i, width, height)
             
             # 为格雷码图案添加噪声和模糊（模拟真实成像）
@@ -1430,7 +1508,43 @@ class UnwrappedPhase():
             _, binary_pattern = cv.threshold(pattern_blurred, 127, 255, cv.THRESH_BINARY)
             cv.imwrite(f"gray_patterns/matched_binary_{i}.png", binary_pattern)
             
-            print(f"生成了格雷码图案 {i+1}/5")
+            print(f"生成了垂直条纹格雷码图案 {i+1}/5")
+        
+        # 生成水平条纹格雷码图案（用于垂直方向解包裹）
+        print("生成水平条纹格雷码图案（用于垂直方向解包裹）...")
+        
+        for i in range(5):
+            # 生成水平条纹格雷码图案
+            # 注意：为了生成水平条纹，我们需要转置格雷码图案的结构
+            pattern_vertical = np.zeros((height, width), np.uint8)
+            row = g.codes[i, :]
+            per_row = int(height / len(row))
+            
+            # 按行填充，创建水平条纹
+            for j in range(len(row)):
+                pattern_vertical[j * per_row: (j + 1) * per_row, :] = row[j] * 255
+            
+            # 为格雷码图案添加噪声和模糊（模拟真实成像）
+            noise = np.random.normal(0, 5, pattern_vertical.shape)
+            pattern_noisy = np.clip(pattern_vertical + noise, 0, 255).astype(np.uint8)
+            
+            # 添加轻微高斯模糊（模拟光学系统）
+            pattern_blurred = cv.GaussianBlur(pattern_noisy, (3, 3), 0.5)
+            
+            # 保存原始水平条纹格雷码图案
+            cv.imwrite(f"gray_patterns_horizontal/gray_bit_{i}.png", pattern_blurred)
+            
+            # 保存二值化水平条纹格雷码图案
+            _, binary_pattern = cv.threshold(pattern_blurred, 127, 255, cv.THRESH_BINARY)
+            cv.imwrite(f"gray_patterns_horizontal/matched_binary_{i}.png", binary_pattern)
+            
+            print(f"生成了水平条纹格雷码图案 {i+1}/5")
+            
+            # 如果当前是垂直方向解包裹，还需要将水平条纹图像复制到gray_patterns目录下
+            if current_direction == "vertical":
+                cv.imwrite(f"gray_patterns/gray_bit_{i}.png", pattern_blurred)
+                cv.imwrite(f"gray_patterns/matched_binary_{i}.png", binary_pattern)
+                print(f"复制水平条纹图像到gray_patterns目录，用于垂直方向解包裹")
         
         # 保存尺寸信息
         if self.standard_size is None:
@@ -1438,6 +1552,20 @@ class UnwrappedPhase():
             
         print("测试图案生成完成!")
         print(f"所有测试图像尺寸: {width}x{height}")
+        print("垂直条纹格雷码（用于水平解包裹）保存在：gray_patterns/")
+        print("水平条纹格雷码（用于垂直解包裹）保存在：gray_patterns_horizontal/")
+        
+        # 提示当前解包裹方向使用的格雷码类型
+        if current_direction == "vertical":
+            print("当前设置为垂直方向解包裹，使用的是水平条纹格雷码")
+            print("已自动将水平条纹格雷码复制到gray_patterns目录")
+        else:
+            print("当前设置为水平方向解包裹，使用的是垂直条纹格雷码")
+        
+        print("\n注意：生成的fringe_patterns中的图像是用于投影的标准相移图案")
+        print("      真实应用中，您需要采集这些图案投影到物体表面后的图像")
+        print("      simulated_captured目录中包含了模拟的物体反射图像，仅供参考")
+        
         return True
 
     def combine_horizontal_vertical_phases(self, horizontal_phase, vertical_phase):
@@ -1675,31 +1803,29 @@ class UnwrappedPhase():
 
 # 如果直接运行此文件
 if __name__ == "__main__":
-    print("解包裹相位计算程序 - 独立版本")
+    print("解包裹相位计算程序 - 主程序")
     print("==================================")
     
     # 用户选项
     print("\n显示选项：")
     print("1. 不显示中间过程图像（只显示最终结果）")
-    print("2. 显示关键中间过程图像（格雷码、四步相移图、K1/K2）")
-    print("3. 显示所有过程图像（包括跳变检测、质量评估等）")
+    print("2. 显示所有过程图像（包括跳变检测、质量评估等）")
     
     try:
         # 获取用户输入的显示选项
-        choice = input("请选择显示选项 (1/2/3)，默认为1: ")
-        if choice not in ["1", "2", "3", ""]:
+        choice = input("请选择显示选项 (1/2)，默认为1: ")
+        if choice not in ["1", "2", ""]:
             print("无效选择，使用默认选项1")
             choice = "1"
         if choice == "":
             choice = "1"
             
-        show_option = int(choice)
-        print(f"已选择显示选项 {show_option}")
+        show_details = choice == "2"
         
         # 方向选择
         print("\n解包裹方向选项：")
-        print("1. 仅水平方向解包裹 (使用I1-I4)")
-        print("2. 仅垂直方向解包裹 (使用I5-I8)")
+        print("1. 仅水平方向解包裹")
+        print("2. 仅垂直方向解包裹")
         print("3. 水平和垂直方向解包裹并组合 (默认)")
         
         direction_choice = input("请选择解包裹方向 (1/2/3)，默认为3: ")
@@ -1724,363 +1850,239 @@ if __name__ == "__main__":
         print("\n图像尺寸标准化选项：")
         print("1. 自动裁剪到最小尺寸 (默认)")
         print("2. 缩放所有图像到相同尺寸")
-        print("3. 手动指定目标尺寸")
         
-        size_choice = input("请选择图像尺寸标准化方法 (1/2/3)，默认为1: ")
-        if size_choice not in ["1", "2", "3", ""]:
-            print("无效选择，使用默认选项1")
-            size_choice = "1"
-        if size_choice == "":
-            size_choice = "1"
+        size_choice = input("请选择图像尺寸标准化方法 (1/2)，默认为1: ")
+        size_method = "crop" if size_choice != "2" else "resize"
         
-        # 设置尺寸调整方法
-        size_method = "crop"  # 默认使用裁剪方法
-        standard_size = None  # 默认使用自动计算的最小尺寸
+        # 读取包裹相位图像
+        wrapped_phase_h_path = None
+        wrapped_phase_v_path = None
         
-        if size_choice == "2":
-            size_method = "resize"
-            print("将缩放所有图像到相同尺寸")
-        elif size_choice == "3":
-            size_method = "crop"  # 默认使用裁剪方法，也可以根据用户选择
-            try:
-                width = int(input("请输入目标宽度 (像素)，默认640: ") or 640)
-                height = int(input("请输入目标高度 (像素)，默认480: ") or 480)
-                standard_size = (height, width)  # OpenCV使用(height, width)顺序
-                print(f"将调整所有图像到 {width}x{height} 像素")
-                
-                # 确认缩放还是裁剪
-                method_choice = input("选择调整方法 (1=裁剪, 2=缩放)，默认为1: ")
-                if method_choice == "2":
-                    size_method = "resize"
-                    print("将使用缩放方法")
+        if unwrap_direction in ["horizontal", "both"]:
+            wrapped_phase_h_path = input("\n请输入水平方向包裹相位图像的路径: ")
+            if not os.path.exists(wrapped_phase_h_path):
+                print(f"错误: 文件 {wrapped_phase_h_path} 不存在")
+                exit()
+        
+        if unwrap_direction in ["vertical", "both"]:
+            wrapped_phase_v_path = input("\n请输入垂直方向包裹相位图像的路径: ")
+            if not os.path.exists(wrapped_phase_v_path):
+                print(f"错误: 文件 {wrapped_phase_v_path} 不存在")
+                exit()
+        
+        # 读取格雷码图像
+        print("\n需要读取格雷码图像")
+        
+        # 水平方向解包裹需要垂直条纹格雷码图像
+        graycode_h_paths = []
+        if unwrap_direction in ["horizontal", "both"]:
+            print("\n请输入用于水平方向解包裹的5张垂直条纹格雷码图像路径:")
+            for i in range(5):
+                path = input(f"垂直条纹格雷码图像 {i+1}/5: ")
+                if not os.path.exists(path):
+                    print(f"错误: 文件 {path} 不存在")
+                    exit()
+                graycode_h_paths.append(path)
+        
+        # 垂直方向解包裹需要水平条纹格雷码图像
+        graycode_v_paths = []
+        if unwrap_direction in ["vertical", "both"]:
+            print("\n请输入用于垂直方向解包裹的5张水平条纹格雷码图像路径:")
+            for i in range(5):
+                path = input(f"水平条纹格雷码图像 {i+1}/5: ")
+                if not os.path.exists(path):
+                    print(f"错误: 文件 {path} 不存在")
+                    exit()
+                graycode_v_paths.append(path)
+        
+        # 是否使用自适应阈值
+        adaptive_choice = input("\n是否使用自适应阈值进行二值化? (y/n)，默认为n: ")
+        adaptive_threshold = adaptive_choice.lower() == "y"
+        
+        # 创建相位解包裹器
+        unwrapper = PhaseUnwrapper(n=5, direction=unwrap_direction)
+        
+        # 执行水平方向解包裹
+        horizontal_phase = None
+        if unwrap_direction in ["horizontal", "both"]:
+            print("\n===== 执行水平方向解包裹 =====")
+            
+            # 读取包裹相位图像
+            wrapped_phase_h = cv.imread(wrapped_phase_h_path, -1)
+            if wrapped_phase_h is None:
+                print(f"错误: 无法读取包裹相位图像 {wrapped_phase_h_path}")
+                exit()
+            
+            # 转换为float32类型并确保范围在[0, 2π]
+            if wrapped_phase_h.dtype != np.float32:
+                if wrapped_phase_h.dtype == np.uint8:
+                    # 假设图像为[0, 255]范围，转换为[0, 2π]
+                    wrapped_phase_h = wrapped_phase_h.astype(np.float32) * (2 * math.pi / 255)
+                elif wrapped_phase_h.dtype == np.uint16:
+                    # 假设图像为[0, 65535]范围，转换为[0, 2π]
+                    wrapped_phase_h = wrapped_phase_h.astype(np.float32) * (2 * math.pi / 65535)
                 else:
-                    size_method = "crop"
-                    print("将使用裁剪方法")
-            except ValueError:
-                print("输入无效，使用默认设置")
-                standard_size = None
-                size_method = "crop"
-        
-        # 定义显示标志
-        show_graycodes = show_option >= 2       # 选项2和3显示格雷码图像
-        show_fringe_patterns = show_option >= 2 # 选项2和3显示四步相移图像
-        show_k1_k2 = show_option >= 2           # 选项2和3显示k1和k2矩阵
-        show_all_details = show_option >= 3     # 只有选项3显示所有详细过程
-        
-        # 检查必要的目录是否存在
-        directories_exist = os.path.exists("fringe_patterns") and os.path.exists("gray_patterns")
-        
-        if not directories_exist:
-            print("警告: 未找到所需的图像目录，将生成测试图案")
-            u = UnwrappedPhase()
-            u.generate_test_patterns()  # 生成测试图像
-        
-        # 创建results目录（如果不存在）
-        if not os.path.exists("results"):
-            os.makedirs("results")
-            print("创建了results目录用于保存结果")
-        
-        # 创建解包裹相位计算器实例，设置标准尺寸和方法
-        u = UnwrappedPhase(direction=unwrap_direction)
-        u.standard_size = standard_size
-        u.size_method = size_method
-        
-        print(f"\n图像处理设置:")
-        print(f"  尺寸调整方法: {size_method}")
-        if standard_size:
-            print(f"  目标尺寸: {standard_size[1]}x{standard_size[0]} (宽x高)")
-        else:
-            print(f"  目标尺寸: 自动计算最小公共尺寸")
-        
-        # 如果需要，显示格雷码图像
-        if show_graycodes:
-            print("\n显示格雷码图像...")
-            u.show_graycodes()
+                    # 默认情况，假设已经在[0, 2π]范围内
+                    wrapped_phase_h = wrapped_phase_h.astype(np.float32)
             
-        # 如果需要，显示四步相移图像
-        if show_fringe_patterns:
-            print("\n显示四步相移图像...")
-            u.show_fringe_patterns()
-        
-        # 根据选择的方向进行解包裹相位计算
-        if unwrap_direction == "horizontal":
-            # 仅水平方向解包裹
-            horizontal_phase = u.computeUnwrappedPhase(
-                show_details=show_all_details,
-                direction="horizontal",
-                standard_size=standard_size,
-                size_method=size_method
+            # 读取格雷码图像
+            graycode_h_images = []
+            for path in graycode_h_paths:
+                img = cv.imread(path, -1)
+                if img is None:
+                    print(f"错误: 无法读取格雷码图像 {path}")
+                    exit()
+                graycode_h_images.append(img)
+            
+            # 执行解包裹
+            unwrapper.direction = "horizontal"
+            horizontal_phase = unwrapper.unwrap_phase(
+                wrapped_phase_h,
+                graycode_h_images,
+                adaptive_threshold=adaptive_threshold,
+                show_results=show_details
             )
+        
+        # 执行垂直方向解包裹
+        vertical_phase = None
+        if unwrap_direction in ["vertical", "both"]:
+            print("\n===== 执行垂直方向解包裹 =====")
             
-            # 显示并保存结果
-            unwrapped_phase = horizontal_phase
-            result_type = "水平方向"
+            # 读取包裹相位图像
+            wrapped_phase_v = cv.imread(wrapped_phase_v_path, -1)
+            if wrapped_phase_v is None:
+                print(f"错误: 无法读取包裹相位图像 {wrapped_phase_v_path}")
+                exit()
             
-            # 用于交互显示的变量
-            vertical_phase = None
-            is_combined = False
+            # 转换为float32类型并确保范围在[0, 2π]
+            if wrapped_phase_v.dtype != np.float32:
+                if wrapped_phase_v.dtype == np.uint8:
+                    # 假设图像为[0, 255]范围，转换为[0, 2π]
+                    wrapped_phase_v = wrapped_phase_v.astype(np.float32) * (2 * math.pi / 255)
+                elif wrapped_phase_v.dtype == np.uint16:
+                    # 假设图像为[0, 65535]范围，转换为[0, 2π]
+                    wrapped_phase_v = wrapped_phase_v.astype(np.float32) * (2 * math.pi / 65535)
+                else:
+                    # 默认情况，假设已经在[0, 2π]范围内
+                    wrapped_phase_v = wrapped_phase_v.astype(np.float32)
             
-            # 保存最终结果
-            final_scaled = (unwrapped_phase * 255 / np.max(unwrapped_phase)).astype(np.uint8)
-            final_color = cv.applyColorMap(final_scaled, cv.COLORMAP_JET)
+            # 读取格雷码图像
+            graycode_v_images = []
+            for path in graycode_v_paths:
+                img = cv.imread(path, -1)
+                if img is None:
+                    print(f"错误: 无法读取格雷码图像 {path}")
+                    exit()
+                graycode_v_images.append(img)
             
-        elif unwrap_direction == "vertical":
-            # 仅垂直方向解包裹
-            vertical_phase = u.computeUnwrappedPhase(
-                show_details=show_all_details,
-                direction="vertical",
-                standard_size=standard_size,
-                size_method=size_method
+            # 执行解包裹
+            unwrapper.direction = "vertical"
+            vertical_phase = unwrapper.unwrap_phase(
+                wrapped_phase_v,
+                graycode_v_images,
+                adaptive_threshold=adaptive_threshold,
+                show_results=show_details
             )
+        
+        # 组合水平和垂直方向的解包裹相位
+        if unwrap_direction == "both" and horizontal_phase is not None and vertical_phase is not None:
+            print("\n===== 组合水平和垂直方向解包裹相位 =====")
             
-            # 显示并保存结果
-            unwrapped_phase = vertical_phase
-            result_type = "垂直方向"
+            # 确保两个相位矩阵的尺寸一致
+            if horizontal_phase.shape != vertical_phase.shape:
+                print("警告: 水平和垂直相位矩阵尺寸不一致，将调整到相同尺寸")
+                min_rows = min(horizontal_phase.shape[0], vertical_phase.shape[0])
+                min_cols = min(horizontal_phase.shape[1], vertical_phase.shape[1])
+                
+                horizontal_phase = horizontal_phase[:min_rows, :min_cols]
+                vertical_phase = vertical_phase[:min_rows, :min_cols]
             
-            # 用于交互显示的变量
-            horizontal_phase = None
-            is_combined = False
+            # 创建双通道数据结构，同时保存水平和垂直方向的相位值
+            combined_data = np.zeros((horizontal_phase.shape[0], horizontal_phase.shape[1], 2), dtype=np.float32)
+            combined_data[:,:,0] = horizontal_phase  # 第一个通道存储水平方向的相位
+            combined_data[:,:,1] = vertical_phase    # 第二个通道存储垂直方向的相位
             
-            # 保存最终结果
-            final_scaled = (unwrapped_phase * 255 / np.max(unwrapped_phase)).astype(np.uint8)
-            final_color = cv.applyColorMap(final_scaled, cv.COLORMAP_JET)
+            # 创建可视化结果目录
+            if not os.path.exists("results"):
+                os.makedirs("results")
+                
+            # 使用numpy的格式保存原始相位数据
+            np.save("results/combined_phase_data.npy", combined_data)
+            np.save("results/horizontal_phase.npy", horizontal_phase)
+            np.save("results/vertical_phase.npy", vertical_phase)
             
-        else:  # both
-            # 先进行水平方向解包裹
-            print("\n===== 步骤1: 水平方向解包裹 =====")
-            horizontal_phase = u.computeUnwrappedPhase(
-                show_details=show_all_details,
-                direction="horizontal",
-                standard_size=standard_size,
-                size_method=size_method
-            )
-            
-            # 获取已确定的标准尺寸（可能在第一步解包裹中已经计算出）
-            standard_size = u.standard_size
-            
-            # 再进行垂直方向解包裹
-            print("\n===== 步骤2: 垂直方向解包裹 =====")
-            vertical_phase = u.computeUnwrappedPhase(
-                show_details=show_all_details,
-                direction="vertical",
-                standard_size=standard_size,  # 使用已确定的标准尺寸
-                size_method=size_method
-            )
-            
-            # 组合两个方向的解包裹相位
-            print("\n===== 步骤3: 组合水平和垂直方向解包裹相位 =====")
-            combined_visual, combined_data = u.combine_horizontal_vertical_phases(
-                horizontal_phase, vertical_phase
-            )
-            
-            # 显示并保存结果
-            unwrapped_phase = combined_data  # combined_data是一个双通道数据
-            result_type = "组合"
-            is_combined = True
-            
-            # 在组合模式下，使用可视化图像作为最终显示结果
-            final_color = combined_visual
-            
-            # 为水平和垂直方向准备伪彩色图
+            # 归一化相位值
             h_max = np.max(horizontal_phase)
             v_max = np.max(vertical_phase)
             
-            h_scaled = (horizontal_phase * 255 / h_max).astype(np.uint8)
-            v_scaled = (vertical_phase * 255 / v_max).astype(np.uint8)
+            h_norm = horizontal_phase / h_max if h_max > 0 else horizontal_phase
+            v_norm = vertical_phase / v_max if v_max > 0 else vertical_phase
+            
+            # 创建伪彩色图
+            h_scaled = (h_norm * 255).astype(np.uint8)
+            v_scaled = (v_norm * 255).astype(np.uint8)
             
             h_color = cv.applyColorMap(h_scaled, cv.COLORMAP_JET)
             v_color = cv.applyColorMap(v_scaled, cv.COLORMAP_JET)
-        
-        # 根据结果类型保存
-        if is_combined:
-            cv.imwrite(f"results/final_{result_type}_unwrapped_phase.png", final_color)
-        else:
-            cv.imwrite(f"results/final_{result_type}_unwrapped_phase.png", final_color)
-        
-        # 显示最终结果，并添加交互功能
-        print("\n===== 最终结果 =====")
-        if is_combined:
-            print(f"水平相位范围: [{np.min(horizontal_phase)}, {np.max(horizontal_phase)}]")
-            print(f"垂直相位范围: [{np.min(vertical_phase)}, {np.max(vertical_phase)}]")
-        else:
-            print(f"{result_type}解包裹相位范围: [{np.min(unwrapped_phase)}, {np.max(unwrapped_phase)}]")
-        
-        # 定义鼠标回调函数，显示点击位置的相位值
-        def mouse_callback(event, x, y, flags, param):
-            if event == cv.EVENT_LBUTTONDOWN:
-                # 获取窗口名称（用于区分是哪个窗口被点击）
-                window_name = param
-                
-                # 在控制台显示信息
-                print(f"点击位置 ({x}, {y}) - 窗口: {window_name}")
-                
-                # 在组合模式下，显示水平和垂直两个方向的原始相位值
-                if is_combined:
-                    h_phase = horizontal_phase[y, x]
-                    v_phase = vertical_phase[y, x]
-                    h_period = h_phase / (2 * math.pi)
-                    v_period = v_phase / (2 * math.pi)
-                    
-                    print(f"  水平方向(X)相位值: {h_phase:.6f} rad (周期数: {h_period:.6f})")
-                    print(f"  垂直方向(Y)相位值: {v_phase:.6f} rad (周期数: {v_period:.6f})")
-                    
-                    # 计算该点的相位角度和幅值（用于二维相位分布图）
-                    h_norm = h_phase / np.max(horizontal_phase) if np.max(horizontal_phase) > 0 else h_phase
-                    v_norm = v_phase / np.max(vertical_phase) if np.max(vertical_phase) > 0 else v_phase
-                    phase_angle = np.arctan2(v_norm, h_norm)
-                    phase_angle_deg = phase_angle * 180 / np.pi
-                    phase_magnitude = np.sqrt(h_norm**2 + v_norm**2)
-                    
-                    print(f"  相位角度: {phase_angle_deg:.2f}°")
-                    print(f"  相位幅值: {phase_magnitude:.4f}")
-                else:
-                    # 获取点击位置的相位值
-                    phase_value = unwrapped_phase[y, x]
-                    # 计算相位值对应的周期数
-                    period = phase_value / (2 * math.pi)
-                    
-                    if result_type == "水平方向":
-                        print(f"  水平方向(X)相位值: {phase_value:.6f} rad (周期数: {period:.6f})")
-                    else:
-                        print(f"  垂直方向(Y)相位值: {phase_value:.6f} rad (周期数: {period:.6f})")
-                
-                # 根据点击的窗口选择合适的图像进行更新
-                if window_name == "组合相位图":
-                    display_img = final_color.copy()
-                elif window_name == "水平方向相位图" and is_combined:
-                    display_img = h_color.copy()
-                elif window_name == "垂直方向相位图" and is_combined:
-                    display_img = v_color.copy()
-                else:
-                    display_img = final_color.copy()
-                
-                # 绘制十字标记
-                cv.drawMarker(display_img, (x, y), (0, 255, 255), cv.MARKER_CROSS, 20, 2)
-                
-                # 添加文本
-                if is_combined:
-                    text1 = f"X: {horizontal_phase[y, x]:.2f} rad"
-                    text2 = f"Y: {vertical_phase[y, x]:.2f} rad"
-                    cv.putText(display_img, text1, (x + 10, y - 25), cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-                    cv.putText(display_img, text2, (x + 10, y - 5), cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-                else:
-                    phase_value = unwrapped_phase[y, x]
-                    text = f"Phase: {phase_value:.2f} rad"
-                    cv.putText(display_img, text, (x + 10, y - 10), cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-                
-                # 更新显示
-                cv.imshow(window_name, display_img)
-                
-                # 在组合模式下，同步显示在所有三个窗口上点击的位置
-                if is_combined:
-                    # 如果点击的不是当前窗口，也更新其他窗口
-                    if window_name != "组合相位图":
-                        comb_img = final_color.copy()
-                        cv.drawMarker(comb_img, (x, y), (0, 255, 255), cv.MARKER_CROSS, 20, 2)
-                        cv.putText(comb_img, text1, (x + 10, y - 25), cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-                        cv.putText(comb_img, text2, (x + 10, y - 5), cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-                        cv.imshow("组合相位图", comb_img)
-                    
-                    if window_name != "水平方向相位图":
-                        h_img = h_color.copy()
-                        cv.drawMarker(h_img, (x, y), (0, 255, 255), cv.MARKER_CROSS, 20, 2)
-                        cv.putText(h_img, text1, (x + 10, y - 25), cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-                        cv.imshow("水平方向相位图", h_img)
-                    
-                    if window_name != "垂直方向相位图":
-                        v_img = v_color.copy()
-                        cv.drawMarker(v_img, (x, y), (0, 255, 255), cv.MARKER_CROSS, 20, 2)
-                        cv.putText(v_img, text2, (x + 10, y - 25), cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-                        cv.imshow("垂直方向相位图", v_img)
-        
-        # 显示解包裹相位图像
-        if is_combined:
-            # 在组合模式下显示三个窗口：组合相位图、水平相位图和垂直相位图
-            cv.imshow("组合相位图", final_color)
+            
+            # 保存单独的相位图
+            cv.imwrite("results/horizontal_phase_color.png", h_color)
+            cv.imwrite("results/vertical_phase_color.png", v_color)
+            
+            # 创建二维相位分布图
+            # 将水平和垂直相位归一化到[0,1]范围，然后使用HSV颜色空间表示
+            # 色调(H)用于表示相位角度(atan2(v_norm, h_norm))
+            # 饱和度(S)保持最大
+            # 亮度(V)表示相位幅值(sqrt(h_norm^2 + v_norm^2))
+            
+            # 计算相位角度和幅值
+            phase_angle = np.arctan2(v_norm, h_norm) # 范围[-pi, pi]
+            phase_angle = (phase_angle + np.pi) / (2 * np.pi) # 归一化到[0,1]
+            
+            phase_magnitude = np.sqrt(h_norm**2 + v_norm**2)
+            # 归一化幅值到[0,1]
+            phase_magnitude = np.clip(phase_magnitude, 0, 1)
+            
+            # 创建HSV图像
+            hsv_image = np.zeros((horizontal_phase.shape[0], horizontal_phase.shape[1], 3), dtype=np.float32)
+            hsv_image[:,:,0] = phase_angle * 179 # H通道，范围[0,179]
+            hsv_image[:,:,1] = 255              # S通道，最大饱和度
+            hsv_image[:,:,2] = phase_magnitude * 255 # V通道，范围[0,255]
+            
+            # 转换HSV到BGR
+            hsv_image = hsv_image.astype(np.uint8)
+            phase_dist_map = cv.cvtColor(hsv_image, cv.COLOR_HSV2BGR)
+            
+            # 保存二维相位分布图
+            cv.imwrite("results/phase_distribution_map.png", phase_dist_map)
+            
+            # 显示组合结果
             cv.imshow("水平方向相位图", h_color)
             cv.imshow("垂直方向相位图", v_color)
+            cv.imshow("二维相位分布图", phase_dist_map)
             
-            # 为每个窗口设置带参数的回调函数
-            cv.setMouseCallback("组合相位图", mouse_callback, "组合相位图")
-            cv.setMouseCallback("水平方向相位图", mouse_callback, "水平方向相位图")
-            cv.setMouseCallback("垂直方向相位图", mouse_callback, "垂直方向相位图")
-        else:
-            # 在单一模式下只显示一个窗口
-            window_name = f"{result_type}解包裹相位"
-            cv.imshow(window_name, final_color)
+            # 等待用户按键
+            print("\n交互提示:")
+            print("- 按's'键保存图像")
+            print("- 按'q'键或ESC键退出")
             
-            # 应用直方图均衡化以增强对比度
-            final_scaled = (unwrapped_phase * 255 / np.max(unwrapped_phase)).astype(np.uint8)
-            final_eq = cv.equalizeHist(final_scaled)
-            cv.imshow(f"{result_type}解包裹相位 (均衡化)", final_eq)
+            while True:
+                key = cv.waitKey(0)
+                if key == ord("s"):
+                    # 按's'键保存图像
+                    cv.imwrite("results/combined_phase_user.png", phase_dist_map)
+                    print("已保存组合相位图")
+                elif key == ord("q") or key == 27:  # 'q'键或ESC键
+                    break
             
-            # 设置回调函数
-            cv.setMouseCallback(window_name, mouse_callback, window_name)
+            cv.destroyAllWindows()
         
-        # 显示交互提示
-        print("\n交互提示:")
-        print("- 鼠标点击图像可显示该点的相位值")
-        if is_combined:
-            print("- 点击任意窗口都会在所有窗口中标记相同位置")
-            print("- 组合窗口显示二维相位分布")
-            print("- 水平和垂直窗口分别显示X和Y方向的相位")
-        print("- 按's'键保存图像")
-        print("- 按'q'键或ESC键退出")
+        print("\n相位解包裹处理完成!")
         
-        # 等待用户按键
-        while True:
-            key = cv.waitKey(0)
-            if key == ord("s"):
-                # 按's'键保存图像
-                if is_combined:
-                    cv.imwrite(f"results/final_combined_phase_user.png", final_color)
-                    cv.imwrite(f"results/final_horizontal_phase_user.png", h_color)
-                    cv.imwrite(f"results/final_vertical_phase_user.png", v_color)
-                    print(f"已保存组合相位图和单独的水平/垂直相位图")
-                else:
-                    cv.imwrite(f"results/final_{result_type}_unwrapped_phase_user.png", final_color)
-                    print(f"已保存图像: results/final_{result_type}_unwrapped_phase_user.png")
-            elif key == ord("q") or key == 27:  # 'q'键或ESC键
-                break
-        
-        # 关闭所有图像窗口
-        cv.destroyAllWindows()
-        
-        print("\n程序完成!")
-    
     except Exception as e:
         print(f"程序执行过程中发生错误: {e}")
         import traceback
         traceback.print_exc()
         
-        print("\n尝试使用完全自生成的测试数据进行重试...")
-        
-        # 确保所有需要的目录都存在
-        for directory in ["fringe_patterns", "gray_patterns", "results"]:
-            if not os.path.exists(directory):
-                os.makedirs(directory)
-                print(f"创建了{directory}目录")
-        
-        # 使用新的实例重新生成测试数据
-        u = UnwrappedPhase()
-        
-        # 保留原来设置的标准尺寸和调整方法（如果有）
-        try:
-            # 尝试获取之前设置的标准尺寸
-            if 'standard_size' in locals() and standard_size is not None:
-                u.standard_size = standard_size
-                print(f"使用指定的标准尺寸: {standard_size[1]}x{standard_size[0]}")
-            if 'size_method' in locals() and size_method is not None:
-                u.size_method = size_method
-                print(f"使用指定的尺寸调整方法: {size_method}")
-        except:
-            print("无法使用之前的尺寸设置，使用默认值")
-        
-        # 生成测试数据
-        u.generate_test_patterns()
-        
-        # 重新运行，不显示中间过程
-        print("\n使用测试数据重新开始解包裹相位计算...")
-        unwrapped_phase = u.showUnwrappedPhase(show_k1_k2=False, show_details=False)
-        
-        print("\n程序使用测试数据完成!")
+        cv.destroyAllWindows()
+        print("\n程序异常终止")

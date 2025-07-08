@@ -34,7 +34,7 @@ pip install PySide6  # 仅UI版本需要
 
 程序需要以下目录结构：
 
-```
+```bash
 ├── unwrapped_phase_standalone.py  # 独立版本
 ├── unwrapped_phase_ui.py          # UI版本
 ├── fringe_patterns/               # 存放四步相移图像
@@ -231,7 +231,7 @@ UI界面包含以下主要区域：
 
 四步相移法通过四幅具有固定相移量的图像计算包裹相位：
 
-```
+```bash
 I₀(x,y) = A(x,y) + B(x,y)·cos[φ(x,y)]
 I₁(x,y) = A(x,y) + B(x,y)·cos[φ(x,y) + π/2]
 I₂(x,y) = A(x,y) + B(x,y)·cos[φ(x,y) + π]
@@ -239,8 +239,9 @@ I₃(x,y) = A(x,y) + B(x,y)·cos[φ(x,y) + 3π/2]
 ```
 
 包裹相位计算公式：
-```
-φ(x,y) = arctan[(I₃(x,y) - I₁(x,y)) / (I₀(x,y) - I₂(x,y))]
+
+```bash
+φ(x,y) = arctan2[(I₃(x,y) - I₁(x,y)) / (I₀(x,y) - I₂(x,y))]
 ```
 
 ### 5.2 格雷码辅助解包裹
@@ -257,7 +258,7 @@ I₃(x,y) = A(x,y) + B(x,y)·cos[φ(x,y) + 3π/2]
 
 通过计算调制度(modulation)评估相位质量：
 
-```
+```bash
 modulation = sqrt((I₃-I₁)² + (I₀-I₂)²) / (I₀+I₁+I₂+I₃)
 ```
 
@@ -369,11 +370,12 @@ color_map = cv.applyColorMap(scaled, cv.COLORMAP_VIRIDIS)
 
 包裹相位的范围被限制在[0, 2π)，而实际相位可能跨越多个周期：
 
-```
+```bash
 Φ(x,y) = φ(x,y) + 2πk(x,y)
 ```
 
 其中:
+
 - Φ(x,y)是解包裹相位（绝对相位）
 - φ(x,y)是包裹相位（范围在[0, 2π)）
 - k(x,y)是整数周期数
@@ -406,7 +408,7 @@ color_map = cv.applyColorMap(scaled, cv.COLORMAP_VIRIDIS)
 | `phase_contour_map.png` | 相位等值线图(组合模式) |
 | `phase_3d_distribution.png` | 3D相位分布图(组合模式) |
 
-其中，文件名前缀为`horizontal_`、`vertical_`或`combined_`，分别表示水平方向、垂直方向或组合模式的结果。 
+其中，文件名前缀为`horizontal_`、`vertical_`或`combined_`，分别表示水平方向、垂直方向或组合模式的结果.
 
 ## 9. 详细集成指南
 
@@ -461,7 +463,7 @@ cv.imwrite("integrated_result.png", color_map)
 
 程序期望有特定的目录结构。在您的项目中，应创建以下目录：
 
-```
+```bash
 your_project/
 ├── fringe_patterns/  # 存放四步相移图像
 ├── gray_patterns/    # 存放格雷码图像
@@ -662,6 +664,7 @@ unwrapper.save_unwrapped_phase_results(unwrapped_phase)
 ### 9.6 常见集成问题及解决方案
 
 1. **路径问题**：确保在集成环境中正确设置相对路径
+
    ```python
    import os
    # 修改工作目录
@@ -669,12 +672,14 @@ unwrapper.save_unwrapped_phase_results(unwrapped_phase)
    ```
 
 2. **内存管理**：处理大尺寸图像时，注意内存使用
+
    ```python
    # 使用较小的标准尺寸
    unwrapper.standard_size = (240, 320)  # 较小的分辨率
    ```
 
 3. **自定义图像路径**：修改图像加载逻辑
+
    ```python
    def get_custom_images(custom_path):
        images = []
@@ -689,6 +694,7 @@ unwrapper.save_unwrapped_phase_results(unwrapped_phase)
    ```
 
 4. **错误处理**：添加异常处理机制
+
    ```python
    try:
        unwrapped_phase = unwrapper.computeUnwrappedPhase()
@@ -698,6 +704,7 @@ unwrapper.save_unwrapped_phase_results(unwrapped_phase)
    ```
 
 5. **进度监控**：在长时间处理时监控进度
+
    ```python
    # 使用CustomUnwrappedPhase类和进度信号
    # 或添加自定义回调函数
@@ -706,11 +713,13 @@ unwrapper.save_unwrapped_phase_results(unwrapped_phase)
 ### 9.7 性能优化建议
 
 1. **图像尺寸控制**：使用较小的标准尺寸加快处理速度
+
    ```python
    unwrapper.standard_size = (240, 320)  # 较小的尺寸
    ```
 
 2. **禁用不必要的功能**：
+
    ```python
    # 禁用质量评估和跳变检测可提高性能
    unwrapped_phase = unwrapper.phase_unwrapping_with_continuity(wrapped_pha, k1, k2)
@@ -719,6 +728,7 @@ unwrapper.save_unwrapped_phase_results(unwrapped_phase)
    ```
 
 3. **多核处理**：
+
    ```python
    # 对于大型项目，可考虑使用multiprocessing进行并行处理
    import multiprocessing as mp
@@ -739,6 +749,7 @@ unwrapper.save_unwrapped_phase_results(unwrapped_phase)
    ```
 
 4. **GPU加速**：
+
    ```python
    # 对于支持CUDA的环境，可使用GPU加速OpenCV函数
    # 确保使用的是启用CUDA的OpenCV版本
@@ -753,4 +764,4 @@ unwrapper.save_unwrapped_phase_results(unwrapped_phase)
 5. **单元测试**：为集成的功能编写测试用例
 6. **文档**：为集成的相位解包裹模块提供详细文档
 
-通过遵循这些指南，您可以将相位解包裹模块无缝集成到各种3D重建、形变测量、光学计量等应用中。 
+通过遵循这些指南，您可以将相位解包裹模块无缝集成到各种3D重建、形变测量、光学计量等应用中。
