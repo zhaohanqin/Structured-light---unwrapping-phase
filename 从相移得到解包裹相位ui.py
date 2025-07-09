@@ -342,6 +342,11 @@ class Reconstruct3D_UI(QMainWindow):
         self.h_radio = QRadioButton("仅水平解包裹")
         self.v_radio = QRadioButton("仅垂直解包裹")
         self.both_radio = QRadioButton("双向合并")
+
+        self.h_radio.setToolTip("计算水平方向的相位。\n需要垂直方向的相移条纹和垂直方向的格雷码图像。")
+        self.v_radio.setToolTip("计算垂直方向的相位。\n需要水平方向的相移条纹和水平方向的格雷码图像。")
+        self.both_radio.setToolTip("合并水平和垂直两个方向的解包裹结果，生成最终的相位图。\n这是最常用的模式，可以提供最完整的三维表面。")
+        
         self.mode_group.addButton(self.h_radio, 0)
         self.mode_group.addButton(self.v_radio, 1)
         self.mode_group.addButton(self.both_radio, 2)
@@ -358,6 +363,11 @@ class Reconstruct3D_UI(QMainWindow):
         self.fringes_path_edit = self._create_path_selector("相移图像 (文件夹):", path_layout)
         self.v_gray_path_edit = self._create_path_selector("垂直格雷码 (解水平包裹相位):", path_layout)
         self.h_gray_path_edit = self._create_path_selector("水平格雷码 (解垂直包裹相位):", path_layout)
+
+        self.fringes_path_edit.setToolTip("包含所有相移条纹图的文件夹。\n程序会根据步数N自动区分用于水平解包裹的垂直条纹(前N张)\n和用于垂直解包裹的水平条纹(后N张)。")
+        self.v_gray_path_edit.setToolTip("包含垂直格雷码图像的文件夹。\n这些图像用于辅助水平方向的相位解包裹。")
+        self.h_gray_path_edit.setToolTip("包含水平格雷码图像的文件夹。\n这些图像用于辅助垂直方向的相位解包裹。")
+        
         layout.addWidget(path_group)
 
         # Algorithm Parameters
@@ -366,10 +376,12 @@ class Reconstruct3D_UI(QMainWindow):
         param_layout.addWidget(QLabel("相移步数:"))
         self.steps_spin = QSpinBox()
         self.steps_spin.setRange(3, 20); self.steps_spin.setValue(4)
+        self.steps_spin.setToolTip("设置相移的步数 (N)。\n此值必须与生成相移条纹时使用的步数一致。\n常用值为3, 4, 8。")
         param_layout.addWidget(self.steps_spin)
         param_layout.addWidget(QLabel("格雷码位数:"))
         self.gray_bits_spin = QSpinBox()
         self.gray_bits_spin.setRange(3, 10); self.gray_bits_spin.setValue(5)
+        self.gray_bits_spin.setToolTip("设置格雷码的位数。\n此值必须与生成格雷码图像时使用的位数一致。\n位数越多，能解包裹的条纹周期数也越多。")
         param_layout.addWidget(self.gray_bits_spin)
         param_layout.addStretch()
         layout.addWidget(param_group)
@@ -378,12 +390,14 @@ class Reconstruct3D_UI(QMainWindow):
         output_group = QGroupBox("4. 设置输出路径")
         output_layout = QVBoxLayout(output_group)
         self.output_path_edit = self._create_path_selector("输出根目录:", output_layout, "reconstruction_results")
+        self.output_path_edit.setToolTip("所有中间和最终结果都将保存在此文件夹中。")
         layout.addWidget(output_group)
 
         # Action Button
         self.process_button = QPushButton("开始重建")
         self.process_button.setFixedHeight(45)
         self.process_button.setStyleSheet("font-size: 16px; font-weight: bold; background-color: #c8e6c9;")
+        self.process_button.setToolTip("开始执行解包裹和重建流程。")
         self.process_button.clicked.connect(self._start_reconstruction)
         layout.addWidget(self.process_button)
 
@@ -458,19 +472,73 @@ class Reconstruct3D_UI(QMainWindow):
 
     def _show_reference_manual(self):
         """加载并显示参考手册对话框。"""
-        # 构建手册文件的路径
-        try:
-            # 脚本和手册在同一个目录下
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            manual_path = os.path.join(script_dir, '格雷码解包裹操作手册.md')
-        except NameError:
-            # 在某些无法获取 __file__ 的环境中提供备用路径
-            manual_path = '格雷码解包裹操作手册.md'
+        # 将手册内容直接嵌入代码中，避免文件依赖
+        manual_content = """
+# 结构光三维重建参考手册
 
-        if not os.path.exists(manual_path):
-            QMessageBox.warning(self, "错误", f"未找到参考手册文件: '{manual_path}'")
-            return
+欢迎使用本套结构光三维重建工具。本手册旨在阐明一个核心且容易混淆的概念：**投影条纹的方向**与**解包裹相位方向**之间的关系。
 
+---
+
+## 核心问题：为什么条纹方向和解包裹方向是垂直的？
+
+简单来说：**我们用"垂直的尺子"去量"水平的长度"，用"水平的尺子"去量"垂直的高度"。**
+
+在结构光技术中，投影的条纹就是我们用来测量物体形状的"数字尺子"。
+
+### 1. 解水平包裹相位（测量物体水平方向的形状）
+
+*   **目标**：我们想知道物体表面从左到右（即沿 **X轴**）的形状轮廓是如何变化的。
+*   **方法**：为了测量水平方向上的变化，我们投射的"尺子"必须在水平方向上具有刻度。什么样的条纹能在水平方向上形成刻度呢？答案是**垂直条纹**。
+*   **类比**：
+    *   想象一道**栅栏**，栅栏的木条是**垂直**的。
+    *   当您**水平**地沿着栅栏走，您会依次经过"木条-空隙-木条-空隙..."，这种变化为您提供了水平方向上的位置信息。
+    *   同理，当**垂直的条纹光**投射到物体上时，正是这些条纹的左右扭曲，才揭示了物体在**水平方向**上的深度信息。
+
+**结论**：因此，我们使用 **垂直条纹 (Vertical Fringes)** 来进行 **水平方向的解包裹 (Horizontal Unwrapping)**。
+
+> **对应文件**:
+>
+> *   相移图像: `I1.png` 到 `IN.png`
+> *   格雷码图像: 包含**垂直条纹**的格雷码图
+
+---
+
+### 2. 解垂直包裹相位（测量物体垂直方向的形状）
+
+*   **目标**：我们想知道物体表面从上到下（即沿 **Y轴**）的形状轮廓是如何变化的。
+*   **方法**：与上面同理，我们需要一把能在垂直方向上提供刻度的"尺子"。这个"尺子"就是**水平条纹**。
+*   **类比**：
+    *   想象一个**梯子**，梯子的横杆是**水平**的。
+    *   当您**垂直**地向上爬梯子时，您会依次经过"横杆-空隙-横杆-空隙..."，这种变化为您提供了垂直方向上的位置信息。
+    *   同理，当**水平的条纹光**投射到物体上时，正是这些条纹的上下扭曲，才揭示了物体在**垂直方向**上的深度信息。
+
+**结论**：因此，我们使用 **水平条纹 (Horizontal Fringes)** 来进行 **垂直方向的解包裹 (Vertical Unwrapping)**。
+
+> **对应文件**:
+>
+> *   相移图像: `I(N+1).png` 到 `I(2N).png`
+> *   格雷码图像: 包含**水平条纹**的格雷码图
+
+---
+
+## 快速参考表
+
+| 您想做什么？                 | 您需要投影什么方向的条纹？ | 对应哪组相移图像？     | 对应哪种格雷码？   |
+| :--------------------------- | :--------------------------- | :--------------------- | :----------------- |
+| **解水平包裹相位**           | ✅ **垂直**条纹              | `I1` 到 `IN`           | **垂直**格雷码     |
+| **解垂直包裹相位**           | ✅ **水平**条纹              | `I(N+1)` 到 `I(2N)` | **水平**格雷码     |
+
+## 关于格雷码
+
+格雷码的作用是为相移法计算出的包裹相位提供一个绝对的"基准线"，以解决相位模糊的问题。因此，格雷码图案的方向必须与其辅助的相移条纹方向**保持一致**。
+
+*   用**垂直**的格雷码图案，来辅助**垂直**的相移条纹，共同完成**水平**方向的解包裹。
+*   用**水平**的格雷码图案，来辅助**水平**的相移条纹，共同完成**垂直**方向的解包裹。
+
+希望这份手册能帮助您更好地理解和使用本工具。
+"""
+        
         dialog = QDialog(self)
         dialog.setWindowTitle("参考手册: 投影方向与解包裹方向")
         main_geo = self.geometry()
@@ -480,13 +548,7 @@ class Reconstruct3D_UI(QMainWindow):
         
         text_browser = QTextBrowser()
         text_browser.setOpenExternalLinks(True)
-
-        try:
-            with open(manual_path, 'r', encoding='utf-8') as f:
-                markdown_content = f.read()
-            text_browser.setMarkdown(markdown_content)
-        except Exception as e:
-            text_browser.setText(f"无法加载或解析手册文件。\n\n路径: {manual_path}\n错误: {e}")
+        text_browser.setMarkdown(manual_content)
 
         # 应用CSS样式以获得更好的可读性
         text_browser.setStyleSheet("""
