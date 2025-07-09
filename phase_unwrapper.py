@@ -24,16 +24,34 @@ def normalize_image_size(images, target_size=None, method="crop"):
     if len(images) == 0:
         return images
     
-    # 过滤掉None值
-    valid_images = [img for img in images if img is not None]
+    # 过滤掉None值和非图像对象
+    valid_images = []
+    for img in images:
+        if img is not None:
+            try:
+                # 检查是否有shape属性和至少2个维度
+                if hasattr(img, 'shape') and len(img.shape) >= 2:
+                    valid_images.append(img)
+                else:
+                    print(f"警告: 跳过无效图像对象，shape={getattr(img, 'shape', 'unknown')}")
+            except Exception as e:
+                print(f"警告: 处理图像对象时出错: {e}")
+    
     if len(valid_images) == 0:
+        print("错误: 没有有效的图像可供处理")
         return images
     
     # 如果未指定目标尺寸，计算所有图像的最小尺寸
     if target_size is None:
-        min_height = min(img.shape[0] for img in valid_images)
-        min_width = min(img.shape[1] for img in valid_images)
-        target_size = (min_height, min_width)
+        try:
+            min_height = min(img.shape[0] for img in valid_images)
+            min_width = min(img.shape[1] for img in valid_images)
+            target_size = (min_height, min_width)
+        except Exception as e:
+            print(f"计算最小尺寸时出错: {e}")
+            # 使用第一个有效图像的尺寸作为默认值
+            target_size = valid_images[0].shape[:2]
+            print(f"使用第一个有效图像的尺寸作为目标尺寸: {target_size}")
     
     # 检查图像是否需要调整
     need_adjustment = False
@@ -48,21 +66,46 @@ def normalize_image_size(images, target_size=None, method="crop"):
     
     # 调整图像尺寸
     result = []
-    for img in images:
+    for i, img in enumerate(images):
         if img is None:
             result.append(None)
             continue
         
-        if method == "crop":
-            # 裁剪到目标尺寸（从左上角开始）
-            adjusted_img = img[:target_size[0], :target_size[1]]
-        elif method == "resize":
-            # 缩放到目标尺寸
-            adjusted_img = cv.resize(img, (target_size[1], target_size[0]))
-        else:
-            raise ValueError(f"不支持的调整方法: {method}")
-        
-        result.append(adjusted_img)
+        try:
+            # 确保图像有正确的维度
+            if not hasattr(img, 'shape') or len(img.shape) < 2:
+                print(f"警告: 跳过第{i+1}个无效图像对象")
+                result.append(None)
+                continue
+                
+            if method == "crop":
+                # 确保不会超出图像边界
+                if img.shape[0] >= target_size[0] and img.shape[1] >= target_size[1]:
+                    # 裁剪到目标尺寸（从左上角开始）
+                    adjusted_img = img[:target_size[0], :target_size[1]]
+                else:
+                    # 如果图像太小，先放大再裁剪
+                    temp = cv.resize(img, (max(target_size[1], img.shape[1]), max(target_size[0], img.shape[0])))
+                    adjusted_img = temp[:target_size[0], :target_size[1]]
+                    print(f"警告: 图像{i+1}太小，已调整大小后裁剪")
+            elif method == "resize":
+                # 缩放到目标尺寸
+                adjusted_img = cv.resize(img, (target_size[1], target_size[0]))
+            else:
+                raise ValueError(f"不支持的调整方法: {method}")
+            
+            result.append(adjusted_img)
+        except Exception as e:
+            print(f"处理第{i+1}个图像时出错: {e}")
+            # 如果处理失败，添加None
+            result.append(None)
+    
+    # 检查是否有足够的有效图像
+    valid_result = [img for img in result if img is not None]
+    if len(valid_result) == 0:
+        print("错误: 所有图像处理后均无效")
+    else:
+        print(f"成功处理{len(valid_result)}/{len(images)}个图像")
     
     return result
 
@@ -228,7 +271,7 @@ class PhaseUnwrapper:
         
         return binary_images
     
-    def unwrap_phase(self, wrapped_phase, graycode_images, adaptive_threshold=False, show_results=True, basename=""):
+    def unwrap_phase(self, wrapped_phase, graycode_images, adaptive_threshold=False, show_results=True, save_results=True, basename=""):
         """
         解包裹相位
         
@@ -237,6 +280,7 @@ class PhaseUnwrapper:
             graycode_images: 格雷码图像列表
             adaptive_threshold: 是否使用自适应阈值进行二值化，默认为False
             show_results: 是否显示结果，默认为True
+            save_results: 是否保存结果，默认为True
             basename: 文件名前缀，用于区分不同图像的结果
             
         返回:
@@ -296,20 +340,20 @@ class PhaseUnwrapper:
         unwrapped_phase = self.phase_unwrapping_with_continuity(wrapped_phase, k1, k2)
         
         # 限制解包裹相位的范围
-        max_phase = 32 * math.pi  # 5位格雷码的理论最大值
+        max_phase = (2**self.n) * math.pi  # 动态计算理论最大值
         unwrapped_phase = np.clip(unwrapped_phase, 0, max_phase)
         
         # 打印解包裹相位的范围
         print(f"解包裹相位的范围: [{np.min(unwrapped_phase)}, {np.max(unwrapped_phase)}]")
-        print(f"理论范围: [0, {32*math.pi}]")
+        print(f"理论范围: [0, {max_phase}] (基于 {self.n}-bit 格雷码)")
         
         # 对解包裹相位进行平滑处理
         print("对解包裹相位进行平滑处理...")
         smoothed_phase = self.smooth_unwrapped_phase(unwrapped_phase)
         
-        if show_results:
-            # 保存和显示结果
-            self.save_and_display_results(unwrapped_phase, smoothed_phase, self.direction, basename)
+        if save_results:
+            # 根据show_results参数决定是否显示
+            self.save_and_display_results(unwrapped_phase, smoothed_phase, self.direction, basename, display=show_results)
         
         return smoothed_phase
     
@@ -324,34 +368,38 @@ class PhaseUnwrapper:
             tuple: (k1矩阵, k2矩阵)
         """
         # 确保有足够数量的格雷码图像
-        if len(binary_graycodes) < 5:
-            raise ValueError(f"需要至少5张二值化格雷码图像，但只提供了{len(binary_graycodes)}张")
+        if len(binary_graycodes) < self.n:
+            raise ValueError(f"需要至少 {self.n} 张二值化格雷码图像，但只提供了 {len(binary_graycodes)} 张")
         
         rows, cols = binary_graycodes[0].shape
         
+        # k1基于(n-1)位格雷码, k2基于n位格雷码
+        n_k1 = self.n - 1
+        n_k2 = self.n
+        if n_k1 < 1:
+            raise ValueError(f"格雷码位数 n 必须大于1才能生成k1, 当前为 {self.n}")
+
         # 初始化k1和k2矩阵
-        k1 = np.zeros((rows, cols), np.uint8)  # 4位格雷码解码结果
-        k2 = np.zeros((rows, cols), np.uint8)  # 5位格雷码解码结果
+        k1 = np.zeros((rows, cols), np.uint8)  # (n-1)位格雷码解码结果
+        k2 = np.zeros((rows, cols), np.uint8)  # n位格雷码解码结果
         
         # 创建格雷码映射对象
-        g_k1 = GrayCode(4)  # 4位格雷码映射器
-        g_k2 = GrayCode(5)  # 5位格雷码映射器
+        g_k1 = GrayCode(n_k1)  # (n-1)位格雷码映射器
+        g_k2 = GrayCode(n_k2)  # n位格雷码映射器
         
         # 逐像素解码格雷码
         for a in range(rows):
             for b in range(cols):
-                code1 = ""
-                
-                # 组合前4位格雷码，用于计算k1
-                code_k1 = code1 + str(binary_graycodes[0][a,b]) + str(binary_graycodes[1][a,b]) + str(binary_graycodes[2][a,b]) + str(binary_graycodes[3][a,b])
-                
-                # 组合前5位格雷码，用于计算k2
-                code_k2 = code1 + str(binary_graycodes[0][a,b]) + str(binary_graycodes[1][a,b]) + str(binary_graycodes[2][a,b]) + str(binary_graycodes[3][a,b]) + str(binary_graycodes[4][a,b])
-                
                 try:
+                    # 组合(n-1)位格雷码，用于计算k1
+                    code_k1 = "".join([str(binary_graycodes[i][a, b]) for i in range(n_k1)])
+                    
+                    # 组合n位格雷码，用于计算k2
+                    code_k2 = "".join([str(binary_graycodes[i][a, b]) for i in range(n_k2)])
+                    
                     # 查询格雷码映射表，获得对应的十进制值
-                    k1[a,b] = g_k1.code2k[code_k1]  # 4位格雷码对应的十进制数
-                    k2[a,b] = g_k2.code2k[code_k2]  # 5位格雷码对应的十进制数
+                    k1[a,b] = g_k1.code2k[code_k1]
+                    k2[a,b] = g_k2.code2k[code_k2]
                 except KeyError as e:
                     # 对于解码错误的情况，使用相邻像素的值或默认值
                     if a > 0:
@@ -462,29 +510,34 @@ class PhaseUnwrapper:
         
         return smoothed
     
-    def save_and_display_results(self, unwrapped_phase, smoothed_phase, direction="horizontal", basename=""):
+    def save_and_display_results(self, unwrapped_phase, smoothed_phase, direction="horizontal", basename="", display=True):
         """
-        保存和显示解包裹相位结果
+        保存并可选择性地显示解包裹相位结果
         
         参数:
             unwrapped_phase: 原始解包裹相位
             smoothed_phase: 平滑后的解包裹相位
-            direction: 解包裹方向，可选值为"horizontal"或"vertical"，默认为"horizontal"
-            basename: 文件名前缀，用于区分不同图像的结果
+            direction: 解包裹方向
+            basename: 文件名前缀
+            display: 是否显示交互式窗口，默认为True
         """
         # 创建results目录（如果不存在）
-        if not os.path.exists("results"):
-            os.makedirs("results")
+        output_dir = "results"
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
         
         # 构建文件名前缀
         if basename:
-            prefix = f"results/{basename}_{direction}"
+            prefix = os.path.join(output_dir, f"{basename}_{direction}")
         else:
-            prefix = f"results/{direction}"
+            prefix = os.path.join(output_dir, f"{direction}")
 
-        # 将相位值缩放到[0,255]范围
-        unwrapped_scaled = (unwrapped_phase * 255 / np.max(unwrapped_phase)).astype(np.uint8)
-        smoothed_scaled = (smoothed_phase * 255 / np.max(smoothed_phase)).astype(np.uint8)
+        # 将相位值缩放到[0,255]范围，并防止除以零
+        unwrapped_max = np.max(unwrapped_phase)
+        smoothed_max = np.max(smoothed_phase)
+        
+        unwrapped_scaled = (unwrapped_phase * 255 / (unwrapped_max if unwrapped_max > 0 else 1)).astype(np.uint8)
+        smoothed_scaled = (smoothed_phase * 255 / (smoothed_max if smoothed_max > 0 else 1)).astype(np.uint8)
         
         # 应用伪彩色映射以增强可视化效果
         unwrapped_color = cv.applyColorMap(unwrapped_scaled, cv.COLORMAP_JET)
@@ -495,11 +548,16 @@ class PhaseUnwrapper:
         cv.imwrite(f"{prefix}_unwrapped_phase_smoothed.png", smoothed_color)
         
         # 保存为16位PNG，以保留更多细节
-        unwrapped_norm = unwrapped_phase / np.max(unwrapped_phase)
-        smoothed_norm = smoothed_phase / np.max(smoothed_phase)
+        unwrapped_norm = unwrapped_phase / (unwrapped_max if unwrapped_max > 0 else 1)
+        smoothed_norm = smoothed_phase / (smoothed_max if smoothed_max > 0 else 1)
         cv.imwrite(f"{prefix}_unwrapped_phase_height.png", (unwrapped_norm * 65535).astype(np.uint16))
         cv.imwrite(f"{prefix}_smoothed_phase_height.png", (smoothed_norm * 65535).astype(np.uint16))
+        print(f"已将解包裹结果保存到: {os.path.abspath(output_dir)}")
         
+        # 如果不需要显示，则在此处返回
+        if not display:
+            return
+
         # 显示结果
         window_name_orig = f"原始解包裹相位 - {basename}" if basename else "原始解包裹相位"
         window_name_smooth = f"平滑后的解包裹相位 - {basename}" if basename else "平滑后的解包裹相位"
@@ -605,7 +663,7 @@ def generate_combined_phase_image(h_unwrapped, v_unwrapped, output_path=None):
     combined_rgb[:,:,1] = v_norm  # 绿色通道为垂直方向
     combined_rgb[:,:,2] = (h_norm + v_norm) / 2  # 蓝色通道为两者平均
     
-    # 如果指定了输出路径，保存并进行交互式显示
+    # 如果指定了输出路径，保存
     if output_path:
         output_dir = os.path.dirname(output_path)
         if not os.path.exists(output_dir):
@@ -615,52 +673,6 @@ def generate_combined_phase_image(h_unwrapped, v_unwrapped, output_path=None):
         combined_bgr_uint8 = cv.cvtColor((combined_rgb * 255).astype(np.uint8), cv.COLOR_RGB2BGR)
         cv.imwrite(output_path, combined_bgr_uint8)
         print(f"已保存组合相位图到: {output_path}")
-
-        # --- 交互式显示 ---
-        window_name = "Combined Phase Map (Interactive)"
-
-        # 定义鼠标回调函数
-        def mouse_callback_combined(event, x, y, flags, params):
-            if event == cv.EVENT_LBUTTONDOWN:
-                h_phase_map, v_phase_map, base_img = params
-                
-                # 获取点击位置的相位值
-                h_phase_val = h_phase_map[y, x]
-                v_phase_val = v_phase_map[y, x]
-                
-                print(f"点击位置 ({x}, {y}):")
-                print(f"  水平相位值: {h_phase_val:.4f} rad")
-                print(f"  垂直相位值: {v_phase_val:.4f} rad")
-                
-                display_img = base_img.copy()
-                
-                cv.drawMarker(display_img, (x, y), (0, 255, 255), cv.MARKER_CROSS, 20, 2)
-                
-                text_h = f"H-Phase: {h_phase_val:.2f}"
-                text_v = f"V-Phase: {v_phase_val:.2f}"
-                cv.putText(display_img, text_h, (x + 15, y - 15), cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
-                cv.putText(display_img, text_v, (x + 15, y + 15), cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
-                
-                cv.imshow(window_name, display_img)
-
-        cv.imshow(window_name, combined_bgr_uint8)
-        cv.setMouseCallback(window_name, mouse_callback_combined, (h_unwrapped, v_unwrapped, combined_bgr_uint8))
-
-        print("\n--- 组合图像交互 ---")
-        print("- 鼠标点击图像可显示该点的水平和垂直相位值")
-        print("- 按's'键保存原始组合图像的副本")
-        print("- 按'q'键或ESC键退出")
-
-        while True:
-            key = cv.waitKey(0) & 0xFF
-            if key == ord("s"):
-                user_save_path = output_path.replace(".png", "_user_saved.png")
-                cv.imwrite(user_save_path, combined_bgr_uint8)
-                print(f"已保存图像到: {user_save_path}")
-            elif key == ord("q") or key == 27:
-                break
-        
-        cv.destroyAllWindows()
 
     return combined_rgb
 
@@ -781,6 +793,7 @@ if __name__ == "__main__":
                 graycode_images,
                 adaptive_threshold=use_adaptive_threshold,
                 show_results=show_results,
+                save_results=True, # 总是保存结果
                 basename=basename
             )
             all_unwrapped_phases.append(smoothed_phase)

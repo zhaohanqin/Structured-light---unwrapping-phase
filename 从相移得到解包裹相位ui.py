@@ -116,7 +116,7 @@ class ReconstructionThread(QThread):
 
 class InteractiveImage(QLabel):
     """可交互的图像显示控件，用于显示相位值"""
-    # 当用户点击图像时，发射包含像素信息的信号
+    # 当鼠标悬停时，发送像素信息 (x, y, value)
     pixel_info_signal = Signal(str)
 
     def __init__(self, parent=None):
@@ -126,31 +126,36 @@ class InteractiveImage(QLabel):
         self.setStyleSheet("background-color: #f0f0f0; border: 1px solid #ccc;")
         self.setText("无结果图像")
         self.pixmap = None
-        self.raw_data = None  # 用于存储原始的、未处理的数据 (e.g., phase map)
+        self.raw_data = None
+        self.h_phase_data = None
+        self.v_phase_data = None
+        self.setMouseTracking(True) # 开启鼠标跟踪以接收悬停事件
+        self.hover_position = None
 
-    def set_image(self, cv_img, raw_data=None):
-        self.raw_data = raw_data
+    def set_image(self, cv_img, raw_data=None, h_phase_data=None, v_phase_data=None):
+        """设置显示的图像和用于查询的原始数据。"""
         if cv_img is None:
             self.clear()
             self.setText("无结果图像")
             self.pixmap = None
             self.raw_data = None
+            self.h_phase_data = None
+            self.v_phase_data = None
             return
 
+        self.raw_data = raw_data
+        self.h_phase_data = h_phase_data
+        self.v_phase_data = v_phase_data
         h, w = cv_img.shape[:2]
-        
         if len(cv_img.shape) == 2:
-            # 灰度图像
             img_format = QImage.Format_Grayscale8
             bytes_per_line = w
-            q_img = QImage(cv_img.data, w, h, bytes_per_line, img_format)
         else:
-            # BGR彩色图像，转换为RGB
-            cv_img_rgb = cv.cvtColor(cv_img, cv.COLOR_BGR2RGB)
+            cv_img = cv.cvtColor(cv_img, cv.COLOR_BGR2RGB)
             img_format = QImage.Format_RGB888
             bytes_per_line = 3 * w
-            q_img = QImage(cv_img_rgb.data, w, h, bytes_per_line, img_format)
         
+        q_img = QImage(cv_img.data, w, h, bytes_per_line, img_format)
         self.pixmap = QPixmap.fromImage(q_img)
         self.update_display()
         
@@ -161,45 +166,106 @@ class InteractiveImage(QLabel):
     def resizeEvent(self, event):
         self.update_display()
 
-    def mousePressEvent(self, event):
-        """处理鼠标点击事件，计算并发送像素信息。"""
-        if self.raw_data is None or not self.pixmap:
-            self.pixel_info_signal.emit("无图像数据")
+    def mouseMoveEvent(self, event):
+        """处理鼠标悬停事件，计算并发送像素信息。"""
+        if self.pixmap is None:
+            self.hover_position = None
+            self.update()
+            self.pixel_info_signal.emit("")
             return
 
-        label_size = self.size()
-        pixmap_original_size = self.pixmap.size()
+        self.hover_position = event.pos()
+        self.update()
 
-        if pixmap_original_size.width() == 0 or pixmap_original_size.height() == 0:
+        if self.raw_data is None:
             return
 
-        # 计算保持长宽比缩放后pixmap的实际大小和边距
-        scaled_pixmap = self.pixmap.scaled(label_size, Qt.KeepAspectRatio, Qt.FastTransformation)
-        x_offset = (label_size.width() - scaled_pixmap.width()) / 2
-        y_offset = (label_size.height() - scaled_pixmap.height()) / 2
+        widget_size = self.size()
+        pixmap_size = self.pixmap.size()
         
-        click_pos = event.pos()
-        pixmap_x = click_pos.x() - x_offset
-        pixmap_y = click_pos.y() - y_offset
+        scaled_pixmap = self.pixmap.scaled(widget_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        scaled_pixmap_size = scaled_pixmap.size()
 
-        # 检查点击是否在缩放后的pixmap内部
-        if 0 <= pixmap_x < scaled_pixmap.width() and 0 <= pixmap_y < scaled_pixmap.height():
-            # 将点击坐标从缩放后的pixmap空间转换到原始图像空间
-            orig_h, orig_w = self.raw_data.shape[:2]
-            img_x = int((pixmap_x / scaled_pixmap.width()) * orig_w)
-            img_y = int((pixmap_y / scaled_pixmap.height()) * orig_h)
+        # 计算图像在QLabel中的偏移量
+        offset_x = (widget_size.width() - scaled_pixmap_size.width()) / 2
+        offset_y = (widget_size.height() - scaled_pixmap_size.height()) / 2
+
+        pos_in_label = event.pos()
+        x_in_pixmap = pos_in_label.x() - offset_x
+        y_in_pixmap = pos_in_label.y() - offset_y
+
+        # 检查鼠标是否在缩放后的图像范围内
+        if 0 <= x_in_pixmap < scaled_pixmap_size.width() and 0 <= y_in_pixmap < scaled_pixmap_size.height():
+            original_width = self.raw_data.shape[1]
+            original_height = self.raw_data.shape[0]
+
+            # 将鼠标坐标从缩放后的图像映射回原始图像
+            img_x = int(x_in_pixmap * original_width / scaled_pixmap_size.width())
+            img_y = int(y_in_pixmap * original_height / scaled_pixmap_size.height())
             
-            if 0 <= img_x < orig_w and 0 <= img_y < orig_h:
+            # 确保坐标在有效范围内
+            img_x = max(0, min(img_x, original_width - 1))
+            img_y = max(0, min(img_y, original_height - 1))
+
+            info_text = ""
+            # 组合视图，拥有独立的 H/V 相位数据
+            if self.h_phase_data is not None and self.v_phase_data is not None:
+                info_parts = [f"坐标: ({img_x}, {img_y})"]
+                
+                # 确保坐标有效
+                if (img_y < self.h_phase_data.shape[0] and img_x < self.h_phase_data.shape[1] and
+                    img_y < self.v_phase_data.shape[0] and img_x < self.v_phase_data.shape[1]):
+                    
+                    h_phase = self.h_phase_data[img_y, img_x]
+                    h_period = h_phase / (2 * np.pi)
+                    info_parts.append(f"水平相位: {h_phase:.4f} rad, 周期: {h_period:.4f}")
+
+                    v_phase = self.v_phase_data[img_y, img_x]
+                    v_period = v_phase / (2 * np.pi)
+                    info_parts.append(f"垂直相位: {v_phase:.4f} rad, 周期: {v_period:.4f}")
+                
+                info_text = " | ".join(info_parts)
+            
+            # 单通道视图（如 H 或 V 结果）
+            elif len(self.raw_data.shape) == 2:
                 value = self.raw_data[img_y, img_x]
-                if isinstance(value, np.ndarray):  # 彩色图像 (e.g., RGB)
-                    info_str = f"坐标: ({img_x}, {img_y}),  值: {value}"
-                else:  # 单通道图像 (e.g., phase)
-                    info_str = f"坐标: ({img_x}, {img_y}),  相位值: {value:.4f}"
-                self.pixel_info_signal.emit(info_str)
+                period = value / (2 * np.pi)
+                info_text = f"坐标: ({img_x}, {img_y}) | 相位值: {value:.4f} rad | 周期数: {period:.4f}"
+
+            # 其他多通道图像 (如原始的组合图)
             else:
-                self.pixel_info_signal.emit("就绪")
+                value = self.raw_data[img_y, img_x]
+                val_str = ", ".join([f"{v:.4f}" if isinstance(v, (float, np.floating)) else str(v) for v in value])
+                info_text = f"坐标: ({img_x}, {img_y}) | 值: ({val_str})"
+            
+            self.pixel_info_signal.emit(info_text)
         else:
-            self.pixel_info_signal.emit("就绪")
+            self.pixel_info_signal.emit("") # 鼠标在图像外，发送空字符串
+
+    def leaveEvent(self, event):
+        """当鼠标离开控件时，清空信息。"""
+        self.hover_position = None
+        self.update()
+        self.pixel_info_signal.emit("")
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        """重写绘制事件以添加交互式覆盖。"""
+        super().paintEvent(event)
+
+        if self.hover_position and self.pixmap:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
+            
+            x = self.hover_position.x()
+            y = self.hover_position.y()
+
+            # 绘制十字准线
+            painter.setPen(QPen(QColor(0, 255, 255, 150), 1, Qt.DashLine))
+            painter.drawLine(x, 0, x, self.height())
+            painter.drawLine(0, y, self.width(), y)
+            
+            painter.end()
 
 
 class Reconstruct3D_UI(QMainWindow):
@@ -229,7 +295,8 @@ class Reconstruct3D_UI(QMainWindow):
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         self.status_bar.addPermanentWidget(self.progress_bar)
-        self.status_bar.showMessage("就绪")
+        self.status_message = "就绪"
+        self.status_bar.showMessage(self.status_message)
 
     def _set_style(self):
         self.setStyleSheet("""
@@ -346,15 +413,15 @@ class Reconstruct3D_UI(QMainWindow):
         self.h_unwrapped_tab = InteractiveImage()
         self.v_unwrapped_tab = InteractiveImage()
         self.combined_tab = InteractiveImage()
+        panel.addTab(self.h_unwrapped_tab, "水平解包裹结果")
+        panel.addTab(self.v_unwrapped_tab, "垂直解包裹结果")
+        panel.addTab(self.combined_tab, "组合相位图")
 
-        # 连接信号到状态栏更新槽函数
+        # 连接信号到状态栏更新槽
         self.h_unwrapped_tab.pixel_info_signal.connect(self._update_status_bar)
         self.v_unwrapped_tab.pixel_info_signal.connect(self._update_status_bar)
         self.combined_tab.pixel_info_signal.connect(self._update_status_bar)
 
-        panel.addTab(self.h_unwrapped_tab, "水平解包裹结果")
-        panel.addTab(self.v_unwrapped_tab, "垂直解包裹结果")
-        panel.addTab(self.combined_tab, "组合相位图")
         return panel
 
     def _browse_folder(self, line_edit):
@@ -370,6 +437,24 @@ class Reconstruct3D_UI(QMainWindow):
         self.results_panel.setTabVisible(0, mode in [0, 2])
         self.results_panel.setTabVisible(1, mode in [1, 2])
         self.results_panel.setTabVisible(2, mode == 2)
+
+    @Slot(int, str)
+    def _update_progress(self, value, message):
+        """更新进度条和状态栏消息。"""
+        self.progress_bar.setValue(value)
+        self.status_bar.showMessage(f"进度: {value}% - {message}")
+
+    @Slot(str)
+    def _update_status_bar(self, message):
+        """更新状态栏以显示像素信息或恢复默认消息。"""
+        # 只在空闲时更新像素信息，避免覆盖处理进度
+        if not self.process_button.isEnabled():
+            return
+        
+        if message:
+            self.status_bar.showMessage(message)
+        else:
+            self.status_bar.showMessage(self.status_message)
 
     def _show_reference_manual(self):
         """加载并显示参考手册对话框。"""
@@ -480,45 +565,46 @@ class Reconstruct3D_UI(QMainWindow):
             
         self.process_button.setEnabled(False)
         self.progress_bar.setVisible(True)
-        self.status_bar.showMessage("准备开始处理...")
+        self.status_message = "准备开始处理..."
+        self.status_bar.showMessage(self.status_message)
 
         self.thread = ReconstructionThread(params)
-        self.thread.progress_update.connect(lambda v, m: self.status_bar.showMessage(f"进度: {v}% - {m}"))
+        self.thread.progress_update.connect(self._update_progress)
         self.thread.processing_complete.connect(self._on_complete)
         self.thread.processing_error.connect(self._on_error)
         self.thread.start()
 
     def _on_complete(self, results):
-        self.status_bar.showMessage("处理完成！结果已显示。")
+        self.status_message = "处理完成！结果已显示。"
+        self.status_bar.showMessage(self.status_message)
         self.process_button.setEnabled(True)
         self.progress_bar.setVisible(False)
         
         if 'h_unwrapped' in results:
-            raw_data = results['h_unwrapped']
-            display_img = self._to_display_color(raw_data)
-            self.h_unwrapped_tab.set_image(display_img, raw_data)
+            display_img_h = self._to_display_color(results['h_unwrapped'])
+            self.h_unwrapped_tab.set_image(display_img_h, raw_data=results['h_unwrapped'])
         if 'v_unwrapped' in results:
-            raw_data = results['v_unwrapped']
-            display_img = self._to_display_color(raw_data)
-            self.v_unwrapped_tab.set_image(display_img, raw_data)
+            display_img_v = self._to_display_color(results['v_unwrapped'])
+            self.v_unwrapped_tab.set_image(display_img_v, raw_data=results['v_unwrapped'])
         if 'combined' in results:
             # Convert RGB float to BGR uint8 for display
             rgb_float = results['combined']
             bgr_uint8 = cv.cvtColor((rgb_float * 255).astype(np.uint8), cv.COLOR_RGB2BGR)
-            self.combined_tab.set_image(bgr_uint8, raw_data=rgb_float)
+            self.combined_tab.set_image(
+                bgr_uint8, 
+                raw_data=rgb_float, 
+                h_phase_data=results.get('h_unwrapped'),
+                v_phase_data=results.get('v_unwrapped')
+            )
 
         QMessageBox.information(self, "成功", "重建流程已成功完成。")
 
     def _on_error(self, message):
-        self.status_bar.showMessage("处理失败！")
+        self.status_message = "处理失败！"
+        self.status_bar.showMessage(self.status_message)
         self.process_button.setEnabled(True)
         self.progress_bar.setVisible(False)
         QMessageBox.critical(self, "处理错误", f"发生错误: {message}")
-
-    @Slot(str)
-    def _update_status_bar(self, text):
-        """更新状态栏的文本。"""
-        self.status_bar.showMessage(text)
 
     def _to_display_color(self, phase_map):
         if phase_map is None: return None

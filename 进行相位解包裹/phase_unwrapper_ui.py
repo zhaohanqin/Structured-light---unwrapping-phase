@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QLabel, QSpinBox, QLineEdit, 
                                QPushButton, QFileDialog, QRadioButton, QButtonGroup, 
                                QGroupBox, QTabWidget, QSplitter, QMessageBox, 
-                               QProgressBar, QScrollArea, QCheckBox, QComboBox)
+                               QProgressBar, QScrollArea, QCheckBox, QComboBox, QDialog, QTextBrowser)
 from PySide6.QtGui import QPixmap, QImage, QColor, QPalette, QPainter, QPen
 from PySide6.QtCore import Qt, Signal, Slot, QThread, QObject
 import cv2 as cv
@@ -602,6 +602,94 @@ class PhaseUnwrapperUI(QMainWindow):
         # Normalize to 0-255 and apply colormap
         norm = cv.normalize(phase_map, None, 0, 255, cv.NORM_MINMAX, cv.CV_8U)
         return cv.applyColorMap(norm, cv.COLORMAP_JET)
+
+    def _show_reference_manual(self):
+        """加载并显示参考手册对话框。"""
+        # 构建手册文件的路径
+        try:
+            # 手册位于当前脚本的父目录中
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            manual_path = os.path.normpath(os.path.join(script_dir, '..', '格雷码解包裹操作手册.md'))
+        except NameError:
+            # 在某些无法获取 __file__ 的环境中提供备用路径
+            manual_path = '../格雷码解包裹操作手册.md'
+
+        if not os.path.exists(manual_path):
+            QMessageBox.warning(self, "错误", f"未找到参考手册文件: '{manual_path}'")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("参考手册: 投影方向与解包裹方向")
+        main_geo = self.geometry()
+        dialog.setGeometry(main_geo.x() + 50, main_geo.y() + 50, 750, 600)
+        
+        layout = QVBoxLayout(dialog)
+        
+        text_browser = QTextBrowser()
+        text_browser.setOpenExternalLinks(True)
+
+        try:
+            with open(manual_path, 'r', encoding='utf-8') as f:
+                markdown_content = f.read()
+            text_browser.setMarkdown(markdown_content)
+        except Exception as e:
+            text_browser.setText(f"无法加载或解析手册文件。\n\n路径: {manual_path}\n错误: {e}")
+
+        # 应用CSS样式以获得更好的可读性
+        text_browser.setStyleSheet("""
+            QTextBrowser {
+                font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+                font-size: 15px;
+                padding: 15px;
+                background-color: #ffffff;
+                border-radius: 4px;
+                border: 1px solid #ddd;
+            }
+            h1, h2, h3 {
+                font-weight: 600;
+                margin-top: 20px;
+                margin-bottom: 10px;
+                padding-bottom: 5px;
+                border-bottom: 1px solid #eaecef;
+            }
+            h1 { font-size: 24px; }
+            h2 { font-size: 20px; }
+            h3 { font-size: 16px; }
+            p { line-height: 1.6; margin-bottom: 12px; }
+            code {
+                font-family: "Consolas", "Courier New", monospace;
+                background-color: #f6f8fa;
+                padding: 3px 5px;
+                font-size: 14px;
+                border-radius: 3px;
+            }
+            table {
+                border-collapse: collapse;
+                margin: 15px 0;
+                font-size: 14px;
+                width: 100%;
+            }
+            th, td {
+                border: 1px solid #dfe2e5;
+                padding: 8px 12px;
+            }
+            th {
+                background-color: #f6f8fa;
+                font-weight: bold;
+            }
+        """)
+
+        layout.addWidget(text_browser)
+        
+        button_box = QHBoxLayout()
+        button_box.addStretch()
+        close_button = QPushButton("关闭")
+        close_button.setDefault(True)
+        close_button.clicked.connect(dialog.accept)
+        button_box.addWidget(close_button)
+        layout.addLayout(button_box)
+        
+        dialog.exec()
 
     def _on_error(self, message):
         self.process_button.setEnabled(True)
