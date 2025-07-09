@@ -329,7 +329,7 @@ class Reconstruct3D_UI(QMainWindow):
         # Help button
         help_button_layout = QHBoxLayout()
         help_button_layout.addStretch()
-        help_button = QPushButton("📖 查看参考手册")
+        help_button = QPushButton("查看参考手册")
         help_button.setStyleSheet("padding: 4px 8px; font-size: 13px;") # Make it less prominent
         help_button.clicked.connect(self._show_reference_manual)
         help_button_layout.addWidget(help_button)
@@ -381,7 +381,7 @@ class Reconstruct3D_UI(QMainWindow):
         layout.addWidget(output_group)
 
         # Action Button
-        self.process_button = QPushButton("🚀 开始重建")
+        self.process_button = QPushButton("开始重建")
         self.process_button.setFixedHeight(45)
         self.process_button.setStyleSheet("font-size: 16px; font-weight: bold; background-color: #c8e6c9;")
         self.process_button.clicked.connect(self._start_reconstruction)
