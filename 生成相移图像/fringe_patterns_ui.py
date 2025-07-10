@@ -82,6 +82,8 @@ class FringePatternGenerator(QMainWindow):
         self.mode_group = QButtonGroup(self)
         self.single_mode_radio = QRadioButton("单个方向")
         self.batch_mode_radio = QRadioButton("一键生成 (双方向)")
+        self.single_mode_radio.setToolTip("只生成指定方向（垂直或水平）的相移条纹图。")
+        self.batch_mode_radio.setToolTip("一次性生成垂直和水平两个方向的相移条纹图。\n垂直条纹命名为 I1, I2...；水平条纹命名为 I(N+1), I(N+2)...")
         self.mode_group.addButton(self.single_mode_radio, 0)
         self.mode_group.addButton(self.batch_mode_radio, 1)
         self.single_mode_radio.setChecked(True)
@@ -96,6 +98,8 @@ class FringePatternGenerator(QMainWindow):
         # 条纹方向选择按钮
         self.vertical_radio = QRadioButton("垂直条纹 (用于水平方向解包裹)")
         self.horizontal_radio = QRadioButton("水平条纹 (用于垂直方向解包裹)")
+        self.vertical_radio.setToolTip("生成的条纹是垂直的，其相位沿水平方向变化，用于水平解包裹。")
+        self.horizontal_radio.setToolTip("生成的条纹是水平的，其相位沿垂直方向变化，用于垂直解包裹。")
         self.vertical_radio.setChecked(True)  # 默认选择垂直条纹
         
         # 方向图示
@@ -130,6 +134,7 @@ class FringePatternGenerator(QMainWindow):
         self.width_input.setRange(100, 4096)
         self.width_input.setValue(1024)
         self.width_input.setSingleStep(10)
+        self.width_input.setToolTip("设置生成图像的宽度（像素）。\n应与您的投影仪或相机分辨率匹配。")
         params_layout.addRow("图像宽度:", self.width_input)
         
         # 图像高度
@@ -137,6 +142,7 @@ class FringePatternGenerator(QMainWindow):
         self.height_input.setRange(100, 4096)
         self.height_input.setValue(768)
         self.height_input.setSingleStep(10)
+        self.height_input.setToolTip("设置生成图像的高度（像素）。\n应与您的投影仪或相机分辨率匹配。")
         params_layout.addRow("图像高度:", self.height_input)
         
         # 条纹频率
@@ -202,6 +208,8 @@ class FringePatternGenerator(QMainWindow):
         # 保存目录
         self.save_dir_input = QLineEdit("fringe_patterns")
         self.browse_button = QPushButton("浏览...")
+        self.save_dir_input.setToolTip("指定保存生成图像的文件夹路径。")
+        self.browse_button.setToolTip("点击选择一个文件夹来保存生成的条纹图像。")
         save_layout.addWidget(self.save_dir_input, 3)
         save_layout.addWidget(self.browse_button, 1)
         
@@ -215,10 +223,12 @@ class FringePatternGenerator(QMainWindow):
         # 刷新预览按钮
         self.refresh_button = QPushButton("刷新预览")
         self.refresh_button.setStyleSheet("padding: 8px;")
+        self.refresh_button.setToolTip("根据当前参数，更新右侧的预览图像。")
         
         # 生成图案按钮
         self.generate_button = QPushButton("生成图案")
         self.generate_button.setStyleSheet("background-color: #4a90e2; color: white; font-weight: bold; padding: 10px;")
+        self.generate_button.setToolTip("根据当前设置，开始生成并保存相移条纹图像。")
         
         actions_layout.addWidget(self.help_button)
         actions_layout.addWidget(self.refresh_button)
@@ -257,6 +267,8 @@ class FringePatternGenerator(QMainWindow):
         self.phase_input.setRange(1, 4) # 初始范围，会动态更新
         self.phase_slider = QSlider(Qt.Horizontal)
         self.phase_slider.setRange(1, 4) # 初始范围，会动态更新
+        self.phase_input.setToolTip("选择预览第几步的相移图像。")
+        self.phase_slider.setToolTip("拖动滑块以快速预览不同相移步骤的图像。")
         
         phase_layout.addWidget(self.phase_label)
         phase_layout.addWidget(self.phase_input)

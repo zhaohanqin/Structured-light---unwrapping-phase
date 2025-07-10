@@ -51,11 +51,24 @@ class ProcessingThread(QThread):
                 wrapped_phase_paths = []
                 if os.path.isdir(wrapped_input):
                     self.progress_update.emit(25, f"在 {direction} 文件夹中查找 'wrapped_phase_equalized' 文件...")
-                    files = sorted([
-                        f for f in os.listdir(wrapped_input) 
-                        if "wrapped_phase_equalized" in f.lower() and f.lower().endswith(image_extensions)
-                    ])
-                    for f in files: wrapped_phase_paths.append(os.path.join(wrapped_input, f))
+                    # 增强文件查找逻辑：递归搜索子目录
+                    search_keyword = "wrapped_phase_equalized"
+                    found_files = []
+                    for root, _, files in os.walk(wrapped_input):
+                        for file in files:
+                            if search_keyword in file.lower() and file.lower().endswith(image_extensions):
+                                found_files.append(os.path.join(root, file))
+                    
+                    # 如果直接在顶层目录找不到，但在子目录找到了，就使用子目录的结果
+                    if found_files:
+                        wrapped_phase_paths = sorted(found_files)
+                    else: # 保持原有的顶层目录查找逻辑作为后备
+                        files = sorted([
+                            f for f in os.listdir(wrapped_input) 
+                            if search_keyword in f.lower() and f.lower().endswith(image_extensions)
+                        ])
+                        for f in files: wrapped_phase_paths.append(os.path.join(wrapped_input, f))
+
                 elif os.path.isfile(wrapped_input):
                     wrapped_phase_paths.append(wrapped_input)
 
@@ -333,6 +346,9 @@ class PhaseUnwrapperUI(QMainWindow):
         self.h_radio = QRadioButton("仅水平")
         self.v_radio = QRadioButton("仅垂直")
         self.both_radio = QRadioButton("双向合并")
+        self.h_radio.setToolTip("只执行水平方向的解包裹。\n需要输入包裹相位图(来自垂直条纹)和垂直格雷码。")
+        self.v_radio.setToolTip("只执行垂直方向的解包裹。\n需要输入包裹相位图(来自水平条纹)和水平格雷码。")
+        self.both_radio.setToolTip("执行水平和垂直两个方向的解包裹，并生成最终的组合相位图。\n这是推荐的模式，可以得到最完整的结果。")
         self.mode_group.addButton(self.h_radio, 0)
         self.mode_group.addButton(self.v_radio, 1)
         self.mode_group.addButton(self.both_radio, 2)
@@ -351,6 +367,7 @@ class PhaseUnwrapperUI(QMainWindow):
         self.h_group = QGroupBox("水平方向解包裹 (需要垂直条纹)")
         self.h_group.setCheckable(True)
         self.h_group.setChecked(True)
+        self.h_group.setToolTip("用于计算水平方向上的绝对相位。\n您需要提供由“垂直条纹”生成的包裹相位图，以及“垂直格雷码”图像。")
         h_layout = QVBoxLayout(self.h_group)
         h_layout.addLayout(self._create_wrapped_phase_input_selector("h_wrapped", "包裹相位:"))
         self.v_graycode_path = self._create_path_selector("垂直格雷码 (文件夹):", "v_gray", folder_only=True)
@@ -361,6 +378,7 @@ class PhaseUnwrapperUI(QMainWindow):
         self.v_group = QGroupBox("垂直方向解包裹 (需要水平条纹)")
         self.v_group.setCheckable(True)
         self.v_group.setChecked(True)
+        self.v_group.setToolTip("用于计算垂直方向上的绝对相位。\n您需要提供由“水平条纹”生成的包裹相位图，以及“水平格雷码”图像。")
         v_layout = QVBoxLayout(self.v_group)
         v_layout.addLayout(self._create_wrapped_phase_input_selector("v_wrapped", "包裹相位:"))
         self.h_graycode_path = self._create_path_selector("水平格雷码 (文件夹):", "h_gray", folder_only=True)
@@ -376,8 +394,10 @@ class PhaseUnwrapperUI(QMainWindow):
         self.n_gray_spin = QSpinBox()
         self.n_gray_spin.setRange(3, 10)
         self.n_gray_spin.setValue(5)
+        self.n_gray_spin.setToolTip("设置用于解包裹的格雷码图像的位数。\n这个数值必须与您加载的格雷码图像文件夹中的图像数量相匹配。")
         param_layout.addWidget(self.n_gray_spin)
         self.adaptive_check = QCheckBox("自适应阈值")
+        self.adaptive_check.setToolTip("启用后，程序会根据图像内容自动计算二值化阈值。\n对于光照不均匀的图像，建议勾选此项。")
         param_layout.addWidget(self.adaptive_check)
         param_layout.addStretch()
         layout.addWidget(param_group)
@@ -386,6 +406,7 @@ class PhaseUnwrapperUI(QMainWindow):
         self.process_button = QPushButton("开始解包裹")
         self.process_button.setFixedHeight(40)
         self.process_button.setStyleSheet("font-size: 16px; font-weight: bold;")
+        self.process_button.setToolTip("根据当前设置，开始执行相位解包裹流程。")
         self.process_button.clicked.connect(self._on_process)
         layout.addWidget(self.process_button)
 
@@ -410,6 +431,10 @@ class PhaseUnwrapperUI(QMainWindow):
         radio_layout.addWidget(folder_radio)
         radio_layout.addStretch()
         setattr(self, f"{name}_input_mode_group", radio_group)
+        
+        file_radio.setToolTip("选择单个包裹相位图像文件进行处理。")
+        folder_radio.setToolTip("选择一个包含多个包裹相位图像的文件夹进行批量处理。\n程序会自动查找文件名中带有 'wrapped_phase_equalized' 的文件。")
+
         main_layout.addLayout(radio_layout)
         
         path_layout = QHBoxLayout()
@@ -417,6 +442,7 @@ class PhaseUnwrapperUI(QMainWindow):
         edit.setReadOnly(True)
         setattr(self, f"{name}_edit", edit)
         button = QPushButton("浏览...")
+        button.setToolTip(f"点击浏览以选择包裹相位的源文件或文件夹。")
         button.clicked.connect(lambda: self._browse_wrapped_phase(name))
         path_layout.addWidget(edit)
         path_layout.addWidget(button)
@@ -431,6 +457,7 @@ class PhaseUnwrapperUI(QMainWindow):
         edit.setReadOnly(True)
         setattr(self, f"{name}_edit", edit)
         button = QPushButton("浏览...")
+        button.setToolTip(f"点击浏览以选择包含格雷码图像的文件夹。")
         button.clicked.connect(lambda: self._browse_graycode(name))
         layout.addWidget(edit)
         layout.addWidget(button)

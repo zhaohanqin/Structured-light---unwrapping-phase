@@ -84,6 +84,8 @@ class GrayCodePatternGenerator(QMainWindow):
         self.mode_group = QButtonGroup(self)
         self.single_mode_radio = QRadioButton("单个方向")
         self.batch_mode_radio = QRadioButton("一键生成 (双方向)")
+        self.single_mode_radio.setToolTip("只生成指定方向（垂直或水平）的格雷码图案。")
+        self.batch_mode_radio.setToolTip("一次性生成垂直和水平两个方向的格雷码图案，\n并分别保存到对应的子目录中。")
         self.mode_group.addButton(self.single_mode_radio, 0)
         self.mode_group.addButton(self.batch_mode_radio, 1)
         self.single_mode_radio.setChecked(True)
@@ -98,6 +100,8 @@ class GrayCodePatternGenerator(QMainWindow):
         # 条纹方向选择按钮
         self.vertical_radio = QRadioButton("垂直条纹（用于水平方向解包裹）")
         self.horizontal_radio = QRadioButton("水平条纹（用于垂直方向解包裹）")
+        self.vertical_radio.setToolTip("生成的条纹是垂直的，用于解码沿水平方向变化的相位。")
+        self.horizontal_radio.setToolTip("生成的条纹是水平的，用于解码沿垂直方向变化的相位。")
         self.vertical_radio.setChecked(True)  # 默认选择垂直条纹
         
         # 方向图示
@@ -125,6 +129,7 @@ class GrayCodePatternGenerator(QMainWindow):
         self.width_input.setRange(100, 4096)
         self.width_input.setValue(1024)
         self.width_input.setSingleStep(10)
+        self.width_input.setToolTip("设置生成图像的宽度（像素）。\n建议与投影仪或相机的分辨率保持一致。")
         params_layout.addRow("图像宽度:", self.width_input)
         
         # 图像高度
@@ -132,6 +137,7 @@ class GrayCodePatternGenerator(QMainWindow):
         self.height_input.setRange(100, 4096)
         self.height_input.setValue(768)
         self.height_input.setSingleStep(10)
+        self.height_input.setToolTip("设置生成图像的高度（像素）。\n建议与投影仪或相机的分辨率保持一致。")
         params_layout.addRow("图像高度:", self.height_input)
         
         # 格雷码位数
@@ -181,8 +187,10 @@ class GrayCodePatternGenerator(QMainWindow):
         self.custom_dir_check = QRadioButton("自定义保存目录:")
         self.save_dir_input = QLineEdit("")
         self.save_dir_input.setEnabled(False)
+        self.save_dir_input.setToolTip("指定一个自定义的根目录来保存生成的格雷码文件夹。")
         self.browse_button = QPushButton("浏览...")
         self.browse_button.setEnabled(False)
+        self.browse_button.setToolTip("点击选择一个自定义的保存位置。")
         custom_dir_layout.addWidget(self.custom_dir_check)
         custom_dir_layout.addWidget(self.save_dir_input, 3)
         custom_dir_layout.addWidget(self.browse_button, 1)
@@ -191,6 +199,7 @@ class GrayCodePatternGenerator(QMainWindow):
         # 默认目录选项
         self.default_dir_check = QRadioButton("使用默认目录")
         self.default_dir_check.setChecked(True)
+        self.default_dir_check.setToolTip("程序将在当前目录下自动创建 'gray_patterns' 文件夹来保存结果。")
         save_layout.addWidget(self.default_dir_check)
         
         # 4. 操作按钮
@@ -203,10 +212,12 @@ class GrayCodePatternGenerator(QMainWindow):
         # 刷新预览按钮
         self.refresh_button = QPushButton("刷新预览")
         self.refresh_button.setStyleSheet("padding: 8px;")
+        self.refresh_button.setToolTip("根据当前设置的参数，更新右侧的预览图像。")
         
         # 生成图案按钮
         self.generate_button = QPushButton("生成图案")
         self.generate_button.setStyleSheet("background-color: #4a90e2; color: white; font-weight: bold; padding: 10px;")
+        self.generate_button.setToolTip("根据当前设置，开始生成并保存格雷码图像文件。")
         
         actions_layout.addWidget(self.help_button)
         actions_layout.addWidget(self.refresh_button)
@@ -246,6 +257,7 @@ class GrayCodePatternGenerator(QMainWindow):
         self.bit_slider.setValue(0)
         self.bit_slider.setTickPosition(QSlider.TicksBelow)
         self.bit_slider.setTickInterval(1)
+        self.bit_slider.setToolTip("拖动滑块以预览不同位数的格雷码图案。")
         
         self.bit_index_label = QLabel("0")
         self.bit_index_label.setAlignment(Qt.AlignCenter)
