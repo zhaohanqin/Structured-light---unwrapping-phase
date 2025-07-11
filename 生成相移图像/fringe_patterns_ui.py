@@ -6,7 +6,8 @@ import cv2 as cv
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QLineEdit, QRadioButton, 
                              QPushButton, QSpinBox, QGroupBox, QButtonGroup, 
-                             QSlider, QFileDialog, QMessageBox, QFormLayout)
+                             QSlider, QFileDialog, QMessageBox, QFormLayout,
+                             QComboBox)
 from PySide6.QtCore import Qt, QThread, Signal, Slot, QSize
 from PySide6.QtGui import QPixmap, QImage, QColor, QPalette, QFont
 
@@ -238,6 +239,37 @@ class FringePatternGenerator(QMainWindow):
         settings_layout.addWidget(mode_group)
         settings_layout.addWidget(self.direction_group_box)
         settings_layout.addWidget(params_group)
+
+        # 3D对象模拟设置组
+        self.simulation_group = QGroupBox("3D对象模拟")
+        self.simulation_group.setCheckable(True)
+        self.simulation_group.setChecked(False)
+        simulation_layout = QFormLayout(self.simulation_group)
+        simulation_layout.setSpacing(10)
+        
+        self.simulation_group.setToolTip("启用后，将在生成的条纹上模拟一个3D对象，使其产生变形效果。")
+
+        # 形状选择
+        self.shape_combo = QComboBox()
+        self.shape_combo.addItems(["球体", "锥体", "矩形", "多峰高斯"])
+        self.shape_combo.setToolTip("选择要模拟的3D对象形状。")
+        simulation_layout.addRow("对象形状:", self.shape_combo)
+
+        # 调制强度
+        self.modulation_layout = QHBoxLayout()
+        self.modulation_input = QSpinBox()
+        self.modulation_input.setRange(1, 100)
+        self.modulation_input.setValue(30)
+        self.modulation_input.setToolTip("3D对象对相位的调制强度。\n值越大，物体起伏越明显。范围 0.1 - 10.0。")
+        self.modulation_slider = QSlider(Qt.Horizontal)
+        self.modulation_slider.setRange(1, 100)
+        self.modulation_slider.setValue(30)
+        self.modulation_slider.setToolTip(self.modulation_input.toolTip())
+        self.modulation_layout.addWidget(self.modulation_input)
+        self.modulation_layout.addWidget(self.modulation_slider)
+        simulation_layout.addRow("调制强度:", self.modulation_layout)
+        
+        settings_layout.addWidget(self.simulation_group)
         settings_layout.addWidget(save_group)
         settings_layout.addLayout(actions_layout)
         settings_layout.addStretch()
@@ -320,7 +352,13 @@ class FringePatternGenerator(QMainWindow):
         self.browse_button.clicked.connect(self.browse_directory)
         self.refresh_button.clicked.connect(self.update_preview)
         self.generate_button.clicked.connect(self.generate_patterns)
-    
+        
+        # 3D模拟参数变化
+        self.simulation_group.toggled.connect(self.update_preview)
+        self.shape_combo.currentTextChanged.connect(self.update_preview)
+        self.modulation_input.valueChanged.connect(self.sync_modulation_slider)
+        self.modulation_slider.valueChanged.connect(self.sync_modulation_input)
+
     def on_mode_change(self, checked):
         """切换生成模式"""
         if checked: # single_mode_radio is checked
@@ -358,6 +396,16 @@ class FringePatternGenerator(QMainWindow):
         self.phase_input.blockSignals(False)
         self.update_preview()
 
+    def sync_modulation_slider(self, value):
+        """同步调制强度滑块"""
+        self.modulation_slider.setValue(value)
+        self.update_preview()
+
+    def sync_modulation_input(self, value):
+        """同步调制强度输入框"""
+        self.modulation_input.setValue(value)
+        self.update_preview()
+        
     def sync_freq_slider(self, value):
         """同步频率滑块"""
         self.freq_slider.setValue(value)
@@ -403,7 +451,58 @@ class FringePatternGenerator(QMainWindow):
         directory = QFileDialog.getExistingDirectory(self, "选择保存目录")
         if directory:
             self.save_dir_input.setText(directory)
-    
+
+    def _create_3d_object_height_map(self, width, height):
+        """根据UI设置创建3D对象的高度图 (zz)"""
+        if not self.simulation_group.isChecked():
+            return np.zeros((height, width))
+
+        shape = self.shape_combo.currentText()
+        modulation = self.modulation_input.value() / 10.0
+
+        cx, cy = width // 2, height // 2
+        zz = np.zeros((height, width))
+        
+        x = np.arange(width)
+        y = np.arange(height)
+        xx, yy = np.meshgrid(x, y)
+
+        if shape == "球体":
+            r = min(width, height) // 3
+            d = np.sqrt((xx - cx)**2 + (yy - cy)**2)
+            mask = d < r
+            if np.any(mask):
+                zz[mask] = np.sqrt(r**2 - d[mask]**2)
+            
+        elif shape == "锥体":
+            r = min(width, height) // 3
+            d = np.sqrt((xx - cx)**2 + (yy - cy)**2)
+            mask = d < r
+            if np.any(mask):
+                zz[mask] = r - d[mask]
+
+        elif shape == "矩形":
+            rect_width = width // 3
+            rect_height = height // 3
+            x1, x2 = cx - rect_width // 2, cx + rect_width // 2
+            y1, y2 = cy - rect_height // 2, cy + rect_height // 2
+            zz[int(y1):int(y2), int(x1):int(x2)] = min(width, height) // 4
+            
+        elif shape == "多峰高斯":
+            peaks = [
+                (cx - width//4, cy - height//4, width//8, height//8, 1),
+                (cx + width//4, cy + height//4, width//9, height//9, 0.8),
+                (cx + width//5, cy - height//5, width//12, height//12, 0.9)
+            ]
+            for (peak_cx, peak_cy, sig_x, sig_y, h) in peaks:
+                gauss = h * np.exp(-(((xx - peak_cx)**2 / (2 * sig_x**2)) + ((yy - peak_cy)**2 / (2 * sig_y**2))))
+                zz += gauss * min(width, height) / 2
+
+        if np.max(zz) > 0:
+            zz = (zz / np.max(zz)) * modulation
+        
+        return zz
+
     def update_preview(self):
         """更新预览图像"""
         # 获取当前参数
@@ -424,14 +523,17 @@ class FringePatternGenerator(QMainWindow):
         
         # 生成预览图像
         preview_width, preview_height = 400, 300
-        x, y = np.meshgrid(np.linspace(0, 1, preview_width), np.linspace(0, 1, preview_height))
+        x_coords, y_coords = np.meshgrid(np.linspace(0, 1, preview_width), np.linspace(0, 1, preview_height))
         
+        # 生成3D对象高度图
+        zz = self._create_3d_object_height_map(preview_width, preview_height)
+
         if direction == "horizontal":
             # 水平条纹
-            fringe = offset + intensity * np.sin(2 * math.pi * frequency * y + phase_shift)
+            fringe = offset + intensity * np.sin(2 * math.pi * frequency * y_coords + phase_shift + zz)
         else:
             # 垂直条纹
-            fringe = offset + intensity * np.sin(2 * math.pi * frequency * x + phase_shift)
+            fringe = offset + intensity * np.sin(2 * math.pi * frequency * x_coords + phase_shift + zz)
         
         # 添加噪声
         if noise_level > 0:
@@ -474,8 +576,11 @@ class FringePatternGenerator(QMainWindow):
                 os.makedirs(save_dir)
             
             # 生成网格
-            x, y = np.meshgrid(np.linspace(0, 1, width), np.linspace(0, 1, height))
-            
+            x_coords, y_coords = np.meshgrid(np.linspace(0, 1, width), np.linspace(0, 1, height))
+
+            # 生成3D对象高度图
+            zz = self._create_3d_object_height_map(width, height)
+
             # 生成图像
             total_images_generated = 0
             for direction in directions_to_process:
@@ -488,10 +593,10 @@ class FringePatternGenerator(QMainWindow):
                     
                     # 根据方向生成条纹和文件名
                     if direction == "horizontal":
-                        fringe = offset + intensity * np.sin(2 * math.pi * frequency * y + phase_shift)
+                        fringe = offset + intensity * np.sin(2 * math.pi * frequency * y_coords + phase_shift + zz)
                         filename_prefix = f"I{i + 1 + steps}"
                     else: # vertical
-                        fringe = offset + intensity * np.sin(2 * math.pi * frequency * x + phase_shift)
+                        fringe = offset + intensity * np.sin(2 * math.pi * frequency * x_coords + phase_shift + zz)
                         filename_prefix = f"I{i + 1}"
                     
                     # 添加噪声

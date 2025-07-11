@@ -13,11 +13,6 @@ class GrayCode():
     这一特性使其在相位解包裹中特别有用。
     """
     
-    codes = np.array([])  # 格雷码矩阵
-    code2k = {}  # 格雷码到k值的映射
-    k2v = {}     # k值到v值的映射
-    v2k = {}     # v值到k值的映射
-    
     def __init__(self, n: int = 5):
         """
         初始化格雷码生成器
@@ -26,7 +21,12 @@ class GrayCode():
             n: 格雷码位数，默认为5位
         """
         self.n = n
-        self.codes = self.__formCodes(self.n)
+        self.code2k = {}
+        self.k2v = {}
+        self.v2k = {}
+        
+        self.codes = self._generate_gray_codes(n)
+        self.patterns = self._generate_patterns()
         # 从格雷码转换到k
         for k in range(2 ** n):
             self.code2k[self.__code2k(k)] = k
@@ -58,7 +58,7 @@ class GrayCode():
                 code = code_lift + code_right  # 合并两个列表
             return code
 
-    def __formCodes(self, n: int):
+    def _generate_gray_codes(self, n):
         '''
         生成codes矩阵
         
@@ -71,56 +71,119 @@ class GrayCode():
             numpy.ndarray: 格雷码矩阵
         '''
         code_temp = GrayCode.__createGrayCode(n)       # 首先生成n位格雷码储存在code_temp中
-        codes = []
+        gray_codes = []
         for row in range(len(code_temp[0])):           # n位格雷码循环n次
             c = []
             for idx in range(len(code_temp)):          # 循环2**n次
                 c.append(int(code_temp[idx][row]))     # 将code_temp中第idx个元素中的第row个数添加到c中
-            codes.append(c)
-        return np.array(codes, np.uint8)
+            gray_codes.append(c)
+        return np.array(gray_codes, np.uint8)
 
-    def toPattern(self, idx: int, cols: int = 1920, rows: int = 1080):
+    def _generate_patterns(self):
         '''
-        生成垂直条纹格雷码光栅图
+        生成patterns矩阵
         
-        将格雷码转换为投影用的垂直条纹光栅图案
+        将格雷码转换为矩阵形式，便于后续处理
         
         参数:
-            idx: 格雷码索引
-            cols: 图像宽度，默认1920
-            rows: 图像高度，默认1080
+            n: 格雷码位数
             
         返回:
-            numpy.ndarray: 格雷码光栅图像
+            numpy.ndarray: 格雷码矩阵
         '''
-        row = self.codes[idx, :]
-        one_row = np.zeros((cols), np.uint8)
-        per_col = int(cols / len(row))
-        for i in range(len(row)):
-            one_row[i * per_col: (i + 1) * per_col] = row[i]
-        pattern = np.tile(one_row, (rows, 1)) * 255
-        return pattern
-        
-    def toHorizontalPattern(self, idx: int, cols: int = 1920, rows: int = 1080):
-        '''
-        生成水平条纹格雷码光栅图
-        
-        将格雷码转换为投影用的水平条纹光栅图案
+        patterns = []
+        for i in range(self.n):
+            pattern = self.codes[i]
+            patterns.append(pattern)
+        return np.array(patterns, np.uint8)
+
+    def toPattern(self, index, width=512, height=512, deformation=None):
+        """
+        将指定索引的格雷码转换为垂直条纹图案
         
         参数:
-            idx: 格雷码索引
-            cols: 图像宽度，默认1920
-            rows: 图像高度，默认1080
-            
+            index: 格雷码的索引
+            width: 图像宽度
+            height: 图像高度
+            deformation: 变形矩阵 (zz)
+        
         返回:
-            numpy.ndarray: 格雷码光栅图像
-        '''
-        row = self.codes[idx, :]
-        pattern = np.zeros((rows, cols), np.uint8)
-        per_row = int(rows / len(row))
-        for i in range(len(row)):
-            pattern[i * per_row: (i + 1) * per_row, :] = row[i] * 255
-        return pattern
+            pattern: 生成的图案 (numpy数组)
+        """
+        if index < 0 or index >= self.n:
+            raise ValueError(f"索引必须在 0 到 {self.n-1} 之间")
+
+        # 创建坐标网格
+        x = np.arange(width, dtype=np.float32)
+        
+        # 应用变形
+        if deformation is not None:
+            if deformation.shape != (height, width):
+                raise ValueError("变形矩阵的尺寸必须与图像尺寸匹配")
+            # 将变形应用到x坐标
+            x = x - deformation
+
+        # 缩放到格雷码范围
+        scaled_x = (x / width) * (2**self.n)
+        
+        # 量化并限制范围
+        codes = np.floor(scaled_x).astype(int)
+        codes = np.clip(codes, 0, 2**self.n - 1)
+        
+        # 查找格雷码值
+        pattern_1d = self.patterns[index][codes]
+        
+        # 扩展为2D图像
+        if pattern_1d.ndim == 2:
+             pattern_2d = pattern_1d
+        else:
+             pattern_2d = np.tile(pattern_1d, (height, 1))
+
+        return (pattern_2d * 255).astype(np.uint8)
+
+    def toHorizontalPattern(self, index, width=512, height=512, deformation=None):
+        """
+        将指定索引的格雷码转换为水平条纹图案
+        
+        参数:
+            index: 格雷码的索引
+            width: 图像宽度
+            height: 图像高度
+            deformation: 变形矩阵 (zz)
+        
+        返回:
+            pattern: 生成的图案 (numpy数组)
+        """
+        if index < 0 or index >= self.n:
+            raise ValueError(f"索引必须在 0 到 {self.n-1} 之间")
+
+        # 创建坐标网格
+        y = np.arange(height, dtype=np.float32).reshape(-1, 1) # 转换为列向量
+        
+        # 应用变形
+        if deformation is not None:
+            if deformation.shape != (height, width):
+                raise ValueError("变形矩阵的尺寸必须与图像尺寸匹配")
+            # 将变形应用到y坐标
+            y = y - deformation
+            
+        # 缩放到格雷码范围
+        scaled_y = (y / height) * (2**self.n)
+        
+        # 量化并限制范围
+        codes = np.floor(scaled_y).astype(int)
+        codes = np.clip(codes, 0, 2**self.n - 1)
+        
+        # 查找格雷码值
+        pattern_base = self.patterns[index][codes]
+
+        # 如果没有变形，基础图案是单列，需要平铺
+        if deformation is None:
+            pattern_2d = np.tile(pattern_base, (1, width))
+        else:
+            pattern_2d = pattern_base
+
+        return (pattern_2d * 255).astype(np.uint8)
 
     def __code2k(self, k):
         '''

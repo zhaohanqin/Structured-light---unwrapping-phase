@@ -5,7 +5,7 @@ import cv2 as cv
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QLineEdit, QRadioButton, 
                              QPushButton, QSpinBox, QGroupBox, QButtonGroup, 
-                             QSlider, QFileDialog, QMessageBox, QFormLayout)
+                             QSlider, QFileDialog, QMessageBox, QFormLayout, QComboBox)
 from PySide6.QtCore import Qt, QThread, Signal, Slot, QSize
 from PySide6.QtGui import QPixmap, QImage, QColor, QPalette, QFont
 
@@ -227,6 +227,37 @@ class GrayCodePatternGenerator(QMainWindow):
         settings_layout.addWidget(mode_group)
         settings_layout.addWidget(self.direction_group_box)
         settings_layout.addWidget(params_group)
+
+        # 3D对象模拟设置组
+        self.simulation_group = QGroupBox("3D对象模拟")
+        self.simulation_group.setCheckable(True)
+        self.simulation_group.setChecked(False)
+        simulation_layout = QFormLayout(self.simulation_group)
+        simulation_layout.setSpacing(10)
+        
+        self.simulation_group.setToolTip("启用后，将在生成的条纹上模拟一个3D对象，使其产生变形效果。")
+
+        # 形状选择
+        self.shape_combo = QComboBox()
+        self.shape_combo.addItems(["球体", "锥体", "矩形", "多峰高斯"])
+        self.shape_combo.setToolTip("选择要模拟的3D对象形状。")
+        simulation_layout.addRow("对象形状:", self.shape_combo)
+
+        # 调制强度
+        self.modulation_layout = QHBoxLayout()
+        self.modulation_input = QSpinBox()
+        self.modulation_input.setRange(1, 100)
+        self.modulation_input.setValue(10)
+        self.modulation_input.setToolTip("3D对象对位置的调制强度。\n值越大，物体起伏越明显。")
+        self.modulation_slider = QSlider(Qt.Horizontal)
+        self.modulation_slider.setRange(1, 100)
+        self.modulation_slider.setValue(10)
+        self.modulation_slider.setToolTip(self.modulation_input.toolTip())
+        self.modulation_layout.addWidget(self.modulation_input)
+        self.modulation_layout.addWidget(self.modulation_slider)
+        simulation_layout.addRow("调制强度:", self.modulation_layout)
+        
+        settings_layout.addWidget(self.simulation_group)
         settings_layout.addWidget(save_group)
         settings_layout.addLayout(actions_layout)
         settings_layout.addStretch()
@@ -239,7 +270,7 @@ class GrayCodePatternGenerator(QMainWindow):
         # 预览图像区域
         self.preview_label = QLabel()
         self.preview_label.setAlignment(Qt.AlignCenter)
-        self.preview_label.setStyleSheet("background-color: #ffffff; border: 1px solid #e0e0e0;")
+        self.preview_label.setStyleSheet("background-color: #cccccc; border: 1px solid #999999;")
         self.preview_label.setMinimumSize(400, 300)
         
         # 预览信息
@@ -257,6 +288,7 @@ class GrayCodePatternGenerator(QMainWindow):
         self.bit_slider.setValue(0)
         self.bit_slider.setTickPosition(QSlider.TicksBelow)
         self.bit_slider.setTickInterval(1)
+        self.bit_slider.setSingleStep(1)
         self.bit_slider.setToolTip("拖动滑块以预览不同位数的格雷码图案。")
         
         self.bit_index_label = QLabel("0")
@@ -309,6 +341,12 @@ class GrayCodePatternGenerator(QMainWindow):
         self.browse_button.clicked.connect(self.browse_directory)
         self.refresh_button.clicked.connect(self.update_preview)
         self.generate_button.clicked.connect(self.generate_patterns)
+
+        # 3D模拟参数变化
+        self.simulation_group.toggled.connect(self.update_preview)
+        self.shape_combo.currentTextChanged.connect(self.update_preview)
+        self.modulation_input.valueChanged.connect(self.sync_modulation_slider)
+        self.modulation_slider.valueChanged.connect(self.sync_modulation_input)
     
     def on_mode_change(self, checked):
         """切换生成模式"""
@@ -319,6 +357,16 @@ class GrayCodePatternGenerator(QMainWindow):
             self.direction_group_box.setEnabled(False)
             self.generate_button.setText("一键生成所有图案")
     
+    def sync_modulation_slider(self, value):
+        """同步调制强度滑块"""
+        self.modulation_slider.setValue(value)
+        self.update_preview()
+
+    def sync_modulation_input(self, value):
+        """同步调制强度输入框"""
+        self.modulation_input.setValue(value)
+        self.update_preview()
+
     def sync_bits_slider(self, value):
         """同步位数滑块"""
         self.bits_slider.setValue(value)
@@ -381,7 +429,59 @@ class GrayCodePatternGenerator(QMainWindow):
         directory = QFileDialog.getExistingDirectory(self, "选择保存目录")
         if directory:
             self.save_dir_input.setText(directory)
-    
+
+    def _create_3d_object_height_map(self, width, height):
+        """根据UI设置创建3D对象的高度图 (zz)"""
+        if not self.simulation_group.isChecked():
+            return None
+
+        shape = self.shape_combo.currentText()
+        # 对于格雷码，调制强度影响坐标偏移，需要更大的值
+        modulation = self.modulation_input.value()
+
+        cx, cy = width // 2, height // 2
+        zz = np.zeros((height, width))
+        
+        x = np.arange(width)
+        y = np.arange(height)
+        xx, yy = np.meshgrid(x, y)
+
+        if shape == "球体":
+            r = min(width, height) // 3
+            d = np.sqrt((xx - cx)**2 + (yy - cy)**2)
+            mask = d < r
+            if np.any(mask):
+                zz[mask] = np.sqrt(r**2 - d[mask]**2)
+            
+        elif shape == "锥体":
+            r = min(width, height) // 3
+            d = np.sqrt((xx - cx)**2 + (yy - cy)**2)
+            mask = d < r
+            if np.any(mask):
+                zz[mask] = r - d[mask]
+
+        elif shape == "矩形":
+            rect_width = width // 3
+            rect_height = height // 3
+            x1, x2 = cx - rect_width // 2, cx + rect_width // 2
+            y1, y2 = cy - rect_height // 2, cy + rect_height // 2
+            zz[int(y1):int(y2), int(x1):int(x2)] = min(width, height) // 4
+            
+        elif shape == "多峰高斯":
+            peaks = [
+                (cx - width//4, cy - height//4, width//8, height//8, 1),
+                (cx + width//4, cy + height//4, width//9, height//9, 0.8),
+                (cx + width//5, cy - height//5, width//12, height//12, 0.9)
+            ]
+            for (peak_cx, peak_cy, sig_x, sig_y, h) in peaks:
+                gauss = h * np.exp(-(((xx - peak_cx)**2 / (2 * sig_x**2)) + ((yy - peak_cy)**2 / (2 * sig_y**2))))
+                zz += gauss * min(width, height) / 2
+
+        if np.max(zz) > 0:
+            zz = (zz / np.max(zz)) * modulation
+        
+        return zz
+
     def update_preview(self):
         """更新预览图像"""
         # 获取当前参数
@@ -399,13 +499,16 @@ class GrayCodePatternGenerator(QMainWindow):
         # 生成预览图像
         preview_width, preview_height = 400, 300
         
+        # 生成3D对象高度图
+        zz = self._create_3d_object_height_map(preview_width, preview_height)
+
         try:
             if direction == "horizontal":
                 # 水平条纹
-                pattern = g.toHorizontalPattern(bit_index, preview_width, preview_height)
+                pattern = g.toHorizontalPattern(bit_index, preview_width, preview_height, deformation=zz)
             else:
                 # 垂直条纹
-                pattern = g.toPattern(bit_index, preview_width, preview_height)
+                pattern = g.toPattern(bit_index, preview_width, preview_height, deformation=zz)
             
             # 添加噪声
             if noise_level > 0:
@@ -458,6 +561,9 @@ class GrayCodePatternGenerator(QMainWindow):
                 
                 # 创建格雷码生成器
                 g = GrayCode(bits)
+
+                # 生成3D对象高度图
+                zz = self._create_3d_object_height_map(width, height)
                 
                 # 确定实际保存目录（用于显示）
                 if save_dir is None:
@@ -482,9 +588,9 @@ class GrayCodePatternGenerator(QMainWindow):
                 for i in range(bits):
                     # 根据指定的方向生成条纹
                     if direction == "horizontal":
-                        pattern = g.toHorizontalPattern(i, width, height)
+                        pattern = g.toHorizontalPattern(i, width, height, deformation=zz)
                     else:
-                        pattern = g.toPattern(i, width, height)
+                        pattern = g.toPattern(i, width, height, deformation=zz)
                     
                     # 添加噪声（如果指定）
                     if noise_level > 0:
