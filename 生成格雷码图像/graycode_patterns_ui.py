@@ -246,11 +246,11 @@ class GrayCodePatternGenerator(QMainWindow):
         # 调制强度
         self.modulation_layout = QHBoxLayout()
         self.modulation_input = QSpinBox()
-        self.modulation_input.setRange(1, 100)
+        self.modulation_input.setRange(1, 500)
         self.modulation_input.setValue(10)
-        self.modulation_input.setToolTip("3D对象对位置的调制强度。\n值越大，物体起伏越明显。")
+        self.modulation_input.setToolTip("3D对象对位置的调制强度。\n值越大，物体起伏越明显。范围 1-500。")
         self.modulation_slider = QSlider(Qt.Horizontal)
-        self.modulation_slider.setRange(1, 100)
+        self.modulation_slider.setRange(1, 500)
         self.modulation_slider.setValue(10)
         self.modulation_slider.setToolTip(self.modulation_input.toolTip())
         self.modulation_layout.addWidget(self.modulation_input)
@@ -283,6 +283,10 @@ class GrayCodePatternGenerator(QMainWindow):
         bit_layout.setSpacing(10)
         
         self.bit_label = QLabel("预览位索引:")
+        self.bit_input = QSpinBox()
+        self.bit_input.setRange(0, 4)  # 默认5位，索引0-4
+        self.bit_input.setValue(0)
+        self.bit_input.setToolTip("选择预览第几位的格雷码图像。")
         self.bit_slider = QSlider(Qt.Horizontal)
         self.bit_slider.setRange(0, 4)  # 默认5位，索引0-4
         self.bit_slider.setValue(0)
@@ -290,14 +294,10 @@ class GrayCodePatternGenerator(QMainWindow):
         self.bit_slider.setTickInterval(1)
         self.bit_slider.setSingleStep(1)
         self.bit_slider.setToolTip("拖动滑块以预览不同位数的格雷码图案。")
-        
-        self.bit_index_label = QLabel("0")
-        self.bit_index_label.setAlignment(Qt.AlignCenter)
-        self.bit_index_label.setMinimumWidth(20)
-        
+
         bit_layout.addWidget(self.bit_label)
+        bit_layout.addWidget(self.bit_input)
         bit_layout.addWidget(self.bit_slider)
-        bit_layout.addWidget(self.bit_index_label)
         
         # 状态提示
         self.status_label = QLabel("")
@@ -330,6 +330,7 @@ class GrayCodePatternGenerator(QMainWindow):
         self.noise_slider.valueChanged.connect(self.sync_noise_input)
         
         # 位索引变化
+        self.bit_input.valueChanged.connect(self.update_bit_index)
         self.bit_slider.valueChanged.connect(self.update_bit_index)
         
         # 保存目录选项
@@ -372,9 +373,11 @@ class GrayCodePatternGenerator(QMainWindow):
         self.bits_slider.setValue(value)
         # 更新位索引滑块的范围
         self.bit_slider.setRange(0, value - 1)
+        self.bit_input.setRange(0, value - 1)
         # 如果当前位索引超出范围，重置为0
         if self.bit_slider.value() >= value:
             self.bit_slider.setValue(0)
+            self.bit_input.setValue(0)
         self.update_preview()
     
     def sync_bits_input(self, value):
@@ -382,9 +385,11 @@ class GrayCodePatternGenerator(QMainWindow):
         self.bits_input.setValue(value)
         # 更新位索引滑块的范围
         self.bit_slider.setRange(0, value - 1)
+        self.bit_input.setRange(0, value - 1)
         # 如果当前位索引超出范围，重置为0
         if self.bit_slider.value() >= value:
             self.bit_slider.setValue(0)
+            self.bit_input.setValue(0)
         self.update_preview()
     
     def sync_noise_slider(self, value):
@@ -399,8 +404,23 @@ class GrayCodePatternGenerator(QMainWindow):
     
     def update_bit_index(self, value):
         """更新位索引"""
-        self.bit_index_label.setText(str(value))
+        # 同步输入框和滑块
+        self.sync_bit_controls(value)
         self.update_preview()
+
+    def sync_bit_controls(self, value):
+        """同步位索引控件"""
+        # 阻止信号循环
+        self.bit_input.blockSignals(True)
+        self.bit_slider.blockSignals(True)
+        
+        # 更新两个控件的值
+        self.bit_input.setValue(value)
+        self.bit_slider.setValue(value)
+        
+        # 恢复信号
+        self.bit_input.blockSignals(False)
+        self.bit_slider.blockSignals(False)
     
     def update_direction_info(self):
         """更新方向信息"""
@@ -487,7 +507,7 @@ class GrayCodePatternGenerator(QMainWindow):
         # 获取当前参数
         direction = "horizontal" if self.horizontal_radio.isChecked() else "vertical"
         bits = self.bits_input.value()
-        bit_index = self.bit_slider.value()
+        bit_index = self.bit_input.value()
         noise_level = self.noise_input.value()
         
         # 更新信息标签
