@@ -29,6 +29,30 @@ class ProcessingThread(QThread):
             h_unwrapped_results, v_unwrapped_results = [], []
             h_basenames, v_basenames = [], []
 
+            # 加载全黑和全白图像（如果有）
+            black_image = None
+            white_image = None
+            
+            if 'black_image_path' in self.params and self.params['black_image_path']:
+                try:
+                    black_path = self.params['black_image_path']
+                    black_image = cv.imread(black_path, -1)
+                    if black_image is not None and len(black_image.shape) > 2:
+                        black_image = cv.cvtColor(black_image, cv.COLOR_BGR2GRAY)
+                    self.progress_update.emit(2, f"加载全黑图像: {os.path.basename(black_path)}")
+                except Exception as e:
+                    self.progress_update.emit(2, f"加载全黑图像失败: {str(e)}")
+            
+            if 'white_image_path' in self.params and self.params['white_image_path']:
+                try:
+                    white_path = self.params['white_image_path']
+                    white_image = cv.imread(white_path, -1)
+                    if white_image is not None and len(white_image.shape) > 2:
+                        white_image = cv.cvtColor(white_image, cv.COLOR_BGR2GRAY)
+                    self.progress_update.emit(4, f"加载全白图像: {os.path.basename(white_path)}")
+                except Exception as e:
+                    self.progress_update.emit(4, f"加载全白图像失败: {str(e)}")
+
             # 封装 process_unwrapping 调用以捕获输出
             def process_and_report(direction, wrapped_input, graycode_folder, n, adaptive, show=False):
                 self.progress_update.emit(10, f"开始处理 {direction} 方向...")
@@ -85,6 +109,8 @@ class ProcessingThread(QThread):
                     smoothed_phase = unwrapper.unwrap_phase(
                         wrapped_phase,
                         graycode_images,
+                        black_image=black_image,
+                        white_image=white_image,
                         adaptive_threshold=adaptive,
                         show_results=False, # GUI控制显示
                         basename=basename
@@ -366,6 +392,14 @@ class PhaseUnwrapperUI(QMainWindow):
         self.h_graycode_path = self._create_path_selector("水平格雷码 (文件夹):", "h_gray", folder_only=True)
         v_layout.addLayout(self.h_graycode_path)
         path_layout.addWidget(self.v_group)
+        
+        # 添加全黑全白图像输入路径
+        black_white_group = QGroupBox("全黑/全白图像 (可选)")
+        black_white_group.setToolTip("全黑图像用于环境光校正，全白图像用于反射率校正。\n这些图像可以提高解包裹相位的质量和鲁棒性。")
+        black_white_layout = QVBoxLayout(black_white_group)
+        black_white_layout.addLayout(self._create_path_selector("全黑图像:", "black_image", folder_only=False))
+        black_white_layout.addLayout(self._create_path_selector("全白图像:", "white_image", folder_only=False))
+        path_layout.addWidget(black_white_group)
 
         layout.addWidget(path_group)
 
@@ -430,11 +464,43 @@ class PhaseUnwrapperUI(QMainWindow):
         edit = QLineEdit()
         edit.setReadOnly(True)
         setattr(self, f"{name}_edit", edit)
-        button = QPushButton("浏览...")
-        button.clicked.connect(lambda: self._browse_graycode(name))
+        
+        browse_button = QPushButton("浏览...")
+        if folder_only:
+            browse_button.clicked.connect(lambda: self._browse_folder(name))
+        else:
+            browse_button.clicked.connect(lambda: self._browse_file(name))
+        
         layout.addWidget(edit)
-        layout.addWidget(button)
+        layout.addWidget(browse_button)
+        
+        # 添加清除按钮（特别适用于可选的黑白图像）
+        if name in ['black_image', 'white_image']:
+            clear_button = QPushButton("清除")
+            clear_button.clicked.connect(lambda: edit.setText(""))
+            layout.addWidget(clear_button)
+        
         return layout
+
+    def _browse_folder(self, name):
+        """浏览文件夹"""
+        path = QFileDialog.getExistingDirectory(self, f"选择{name}文件夹")
+        if path:
+            getattr(self, f"{name}_edit").setText(path)
+
+    def _browse_file(self, name):
+        """浏览并选择单个文件"""
+        path, _ = QFileDialog.getOpenFileName(
+            self, 
+            f"选择{name.replace('_', ' ')}文件", 
+            filter="图像文件 (*.png *.jpg *.jpeg *.bmp *.tif)"
+        )
+        if path:
+            getattr(self, f"{name}_edit").setText(path)
+
+    def _browse_graycode(self, name):
+        """浏览格雷码文件夹"""
+        self._browse_folder(name)
 
     def _create_results_panel(self):
         panel = QWidget()
@@ -500,13 +566,6 @@ class PhaseUnwrapperUI(QMainWindow):
         if path:
             edit_widget.setText(path)
 
-    def _browse_graycode(self, name):
-        edit_widget = getattr(self, f"{name}_edit")
-        path = QFileDialog.getExistingDirectory(self, "选择格雷码文件夹")
-        if path:
-            edit_widget.setText(path)
-
-    @Slot()
     def _on_process(self):
         params = {}
         mode_id = self.mode_group.checkedId()
@@ -528,6 +587,15 @@ class PhaseUnwrapperUI(QMainWindow):
         except ValueError as e:
             QMessageBox.warning(self, "路径错误", str(e))
             return
+
+        # 添加全黑全白图像路径（如果有）
+        black_path = self.black_image_edit.text()
+        if black_path and os.path.isfile(black_path):
+            params['black_image_path'] = black_path
+            
+        white_path = self.white_image_edit.text()
+        if white_path and os.path.isfile(white_path):
+            params['white_image_path'] = white_path
 
         params['n_graycodes'] = self.n_gray_spin.value()
         params['adaptive_threshold'] = self.adaptive_check.isChecked()

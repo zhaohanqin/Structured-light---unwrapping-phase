@@ -240,18 +240,28 @@ class PhaseUnwrapper:
         self.standard_size = None  # 标准图像尺寸
         self.size_method = "crop"  # 默认使用裁剪方法
     
-    def binarize_graycode_images(self, graycode_images, threshold_value=127):
+    def binarize_graycode_images(self, graycode_images, black_image=None, white_image=None, threshold_value=127):
         """
         对格雷码图像进行二值化处理
         
         参数:
             graycode_images: 格雷码图像列表
+            black_image: 全黑图像，用于环境光校正
+            white_image: 全白图像，用于确定投影区域
             threshold_value: 二值化阈值，默认为127
             
         返回:
             list: 二值化后的格雷码图像列表
         """
         binary_images = []
+        
+        # 如果有全白图像，创建投影区域掩码
+        mask = None
+        if white_image is not None:
+            if black_image is not None:
+                mask = (white_image.astype(np.float32) - black_image.astype(np.float32)) > threshold_value
+            else:
+                mask = white_image.astype(np.float32) > threshold_value
         
         for img in graycode_images:
             # 确保图像是灰度图
@@ -260,24 +270,36 @@ class PhaseUnwrapper:
             else:
                 gray = img
             
+            # 环境光校正
+            if black_image is not None:
+                gray = cv.subtract(gray.astype(np.float32), black_image.astype(np.float32))
+                # 确保没有负值
+                gray = np.maximum(gray, 0)
+            
             # 进行二值化处理
-            _, binary = cv.threshold(gray, threshold_value, 255, cv.THRESH_BINARY)
+            _, binary = cv.threshold(gray.astype(np.uint8), threshold_value, 255, cv.THRESH_BINARY)
             
             # 将像素值从[0,255]归一化到[0,1]范围
             binary_scaled = binary / 255
+            
+            # 应用投影区域掩码（如果有）
+            if mask is not None:
+                binary_scaled = binary_scaled * mask.astype(np.uint8)
             
             # 转换为uint8类型，此时像素值为0或1
             binary_images.append(binary_scaled.astype(np.uint8))
         
         return binary_images
     
-    def unwrap_phase(self, wrapped_phase, graycode_images, adaptive_threshold=False, show_results=True, save_results=True, basename=""):
+    def unwrap_phase(self, wrapped_phase, graycode_images, black_image=None, white_image=None, adaptive_threshold=False, show_results=True, save_results=True, basename=""):
         """
         解包裹相位
         
         参数:
             wrapped_phase: 包裹相位图像，范围[0, 2π]
             graycode_images: 格雷码图像列表
+            black_image: 全黑图像，用于环境光校正
+            white_image: 全白图像，用于确定投影区域
             adaptive_threshold: 是否使用自适应阈值进行二值化，默认为False
             show_results: 是否显示结果，默认为True
             save_results: 是否保存结果，默认为True
@@ -288,10 +310,24 @@ class PhaseUnwrapper:
         """
         # 标准化图像尺寸
         all_images = [wrapped_phase] + graycode_images
+        if black_image is not None:
+            all_images.append(black_image)
+        if white_image is not None:
+            all_images.append(white_image)
+        
         normalized_images = normalize_image_size(all_images, self.standard_size, self.size_method)
         
         wrapped_phase = normalized_images[0]
-        graycode_images = normalized_images[1:]
+        graycode_images = normalized_images[1:1+len(graycode_images)]
+        
+        # 获取标准化后的黑白图像（如果提供了）
+        black_img, white_img = None, None
+        offset = 1 + len(graycode_images)
+        if black_image is not None:
+            black_img = normalized_images[offset]
+            offset += 1
+        if white_image is not None:
+            white_img = normalized_images[offset]
         
         # 确保有足够数量的格雷码图像
         if len(graycode_images) < self.n:
@@ -307,13 +343,24 @@ class PhaseUnwrapper:
                 else:
                     gray = img
                 
+                # 环境光校正
+                if black_img is not None:
+                    gray = cv.subtract(gray.astype(np.float32), black_img.astype(np.float32))
+                    gray = np.maximum(gray, 0).astype(np.uint8)
+                    
                 binary = cv.adaptiveThreshold(gray, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                              cv.THRESH_BINARY, 11, 2)
+                                             cv.THRESH_BINARY, 11, 2)
                 binary_scaled = binary / 255
+                
+                # 应用掩码（如果有）
+                if white_img is not None and black_img is not None:
+                    mask = (white_img.astype(np.float32) - black_img.astype(np.float32)) > 10
+                    binary_scaled = binary_scaled * mask.astype(np.uint8)
+                    
                 binary_images.append(binary_scaled.astype(np.uint8))
         else:
             # 使用固定阈值
-            binary_images = self.binarize_graycode_images(graycode_images)
+            binary_images = self.binarize_graycode_images(graycode_images, black_img, white_img)
         
         # 获取k1和k2矩阵
         k1, k2 = self.get_k1_k2_from_binary(binary_images)

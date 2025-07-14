@@ -21,11 +21,13 @@ class ImageProcessingThread(QThread):
     processing_complete = Signal(object, object, str) # v_phase, h_phase, prefix_base
     processing_error = Signal(str)
     
-    def __init__(self, wrapped_phase_instance, v_images, h_images):
+    def __init__(self, wrapped_phase_instance, v_images, h_images, black_image=None, white_image=None):
         super().__init__()
         self.wp = wrapped_phase_instance
         self.v_images = v_images
         self.h_images = h_images
+        self.black_image = black_image
+        self.white_image = white_image
         
     def run(self):
         try:
@@ -35,7 +37,7 @@ class ImageProcessingThread(QThread):
             # 1. 处理垂直条纹
             if self.v_images and len(self.v_images) >= 3:
                 self.progress_update.emit(10, "计算垂直条纹的包裹相位...")
-                v_phase_result = self.wp.computeWrappedphase(self.v_images)
+                v_phase_result = self.wp.computeWrappedphase(self.v_images, self.black_image, self.white_image)
                 self.progress_update.emit(50, "垂直条纹计算完成。")
             else:
                 self.progress_update.emit(50, "无垂直条纹图像，跳过计算。")
@@ -43,7 +45,7 @@ class ImageProcessingThread(QThread):
             # 2. 处理水平条纹
             if self.h_images and len(self.h_images) >= 3:
                 self.progress_update.emit(60, "计算水平条纹的包裹相位...")
-                h_phase_result = self.wp.computeWrappedphase(self.h_images)
+                h_phase_result = self.wp.computeWrappedphase(self.h_images, self.black_image, self.white_image)
                 self.progress_update.emit(90, "水平条纹计算完成。")
             else:
                 self.progress_update.emit(90, "无水平条纹图像，跳过计算。")
@@ -428,6 +430,41 @@ class WrappedPhaseUI(QMainWindow):
         file_layout.addWidget(self.file_path_edit, 3)
         file_layout.addWidget(self.browse_button, 1)
         input_layout.addLayout(file_layout)
+    
+        # 全黑全白图像选择器
+        black_white_group = QGroupBox("全黑/全白图像 (可选)")
+        black_white_group.setToolTip("全黑图像用于环境光校正，全白图像用于反射率校正。\n这些图像可以提高包裹相位计算的质量和鲁棒性。")
+        black_white_layout = QHBoxLayout(black_white_group)
+        
+        # 全黑图像
+        black_layout = QVBoxLayout()
+        black_layout.addWidget(QLabel("全黑图像:"))
+        self.black_image_path = QLineEdit()
+        self.black_image_path.setPlaceholderText("选择全黑图像...")
+        self.black_image_path.setReadOnly(True)
+        self.black_browse_button = QPushButton("浏览...")
+        self.black_browse_button.clicked.connect(lambda: self.on_black_white_browse("black"))
+        black_button_layout = QHBoxLayout()
+        black_button_layout.addWidget(self.black_image_path)
+        black_button_layout.addWidget(self.black_browse_button)
+        black_layout.addLayout(black_button_layout)
+        
+        # 全白图像
+        white_layout = QVBoxLayout()
+        white_layout.addWidget(QLabel("全白图像:"))
+        self.white_image_path = QLineEdit()
+        self.white_image_path.setPlaceholderText("选择全白图像...")
+        self.white_image_path.setReadOnly(True)
+        self.white_browse_button = QPushButton("浏览...")
+        self.white_browse_button.clicked.connect(lambda: self.on_black_white_browse("white"))
+        white_button_layout = QHBoxLayout()
+        white_button_layout.addWidget(self.white_image_path)
+        white_button_layout.addWidget(self.white_browse_button)
+        white_layout.addLayout(white_button_layout)
+        
+        black_white_layout.addLayout(black_layout)
+        black_white_layout.addLayout(white_layout)
+        input_layout.addWidget(black_white_group)
 
         # 图像处理选项
         process_layout = QHBoxLayout()
@@ -873,7 +910,10 @@ class WrappedPhaseUI(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"创建输出目录失败: {str(e)}")
                 return
-                
+    
+        # 加载全黑全白图像（如果有）
+        black_image, white_image = self._load_black_white_images()
+            
         # 启动处理线程
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
@@ -881,13 +921,15 @@ class WrappedPhaseUI(QMainWindow):
         
         if self.batch_mode_radio.isChecked():
             self.batch_process_button.setEnabled(False)
-            self.processing_thread = ImageProcessingThread(self.wrapped_phase, self.loaded_images_v, self.loaded_images_h)
+            self.processing_thread = ImageProcessingThread(self.wrapped_phase, self.loaded_images_v, self.loaded_images_h,
+                                                          black_image, white_image)
         else:
             self.process_button.setEnabled(False)
             direction = "vertical" if self.vertical_radio.isChecked() else "horizontal"
             v_imgs = self.loaded_images if direction == 'vertical' else []
             h_imgs = self.loaded_images if direction == 'horizontal' else []
-            self.processing_thread = ImageProcessingThread(self.wrapped_phase, v_imgs, h_imgs)
+            self.processing_thread = ImageProcessingThread(self.wrapped_phase, v_imgs, h_imgs,
+                                                          black_image, white_image)
         
         # 连接信号
         self.processing_thread.progress_update.connect(self.update_progress)
@@ -896,7 +938,7 @@ class WrappedPhaseUI(QMainWindow):
         
         # 启动线程
         self.processing_thread.start()
-            
+
     def update_progress(self, value, message):
         """更新进度条和状态栏"""
         self.progress_bar.setValue(value)
@@ -1005,6 +1047,50 @@ class WrappedPhaseUI(QMainWindow):
         self.status_bar.showMessage("计算包裹相位失败")
         self.process_button.setEnabled(True)
         self.batch_process_button.setEnabled(True)
+
+    def on_black_white_browse(self, image_type):
+        """浏览全黑全白图像文件"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"选择{image_type}图像文件",
+            "",
+            "图像文件 (*.png *.jpg *.jpeg *.bmp *.tif *.tiff);;所有文件 (*.*)"
+        )
+        
+        if file_path:
+            if image_type == "black":
+                self.black_image_path.setText(file_path)
+            else:  # white
+                self.white_image_path.setText(file_path)
+
+    def _load_black_white_images(self):
+        """加载全黑全白图像"""
+        black_image = None
+        white_image = None
+        
+        # 单模式下加载
+        if not self.batch_mode_radio.isChecked():
+            black_path = self.black_image_path.text()
+            if black_path and os.path.exists(black_path):
+                try:
+                    black_image = cv.imread(black_path, -1)
+                    if black_image is not None and len(black_image.shape) > 2:
+                        black_image = cv.cvtColor(black_image, cv.COLOR_BGR2GRAY)
+                    self.status_bar.showMessage(f"已加载全黑图像: {os.path.basename(black_path)}")
+                except Exception as e:
+                    print(f"加载全黑图像失败: {str(e)}")
+                    
+            white_path = self.white_image_path.text()
+            if white_path and os.path.exists(white_path):
+                try:
+                    white_image = cv.imread(white_path, -1)
+                    if white_image is not None and len(white_image.shape) > 2:
+                        white_image = cv.cvtColor(white_image, cv.COLOR_BGR2GRAY)
+                    self.status_bar.showMessage(f"已加载全白图像: {os.path.basename(white_path)}")
+                except Exception as e:
+                    print(f"加载全白图像失败: {str(e)}")
+        
+        return black_image, white_image
 
 def main():
     app = QApplication(sys.argv)

@@ -229,15 +229,15 @@ class WrappedPhase():
         
         return I
 
-    def computeWrappedphase(self, I):
+    def computeWrappedphase(self, I, black_image=None, white_image=None):
         """
         计算包裹相位
-        
-        该方法实现了N步相移法的核心算法，通过N幅相移图像计算包裹相位。
         
         参数:
             I: N幅相移图像列表 [I0, I1, ..., I(N-1)]
                每幅图像的相移量为 2π*k/N，其中k为图像索引(0到N-1)
+            black_image: 全黑图像，用于环境光校正
+            white_image: 全白图像，用于反射率校正和投影区域识别
         
         返回:
             numpy.ndarray: 包裹相位矩阵，范围[0, 2π]
@@ -247,8 +247,34 @@ class WrappedPhase():
         if n < 3:
             raise ValueError(f"至少需要3幅相移图像，但只提供了{n}幅")
         
+        # 预处理相移图像（环境光校正和反射率归一化）
+        I_processed = []
+        for img in I:
+            img_float = img.astype(np.float32)
+            
+            # 1. 环境光校正
+            if black_image is not None:
+                img_float = cv.subtract(img_float, black_image.astype(np.float32))
+                
+            # 2. 反射率校正/归一化
+            if white_image is not None and black_image is not None:
+                # 创建投影区域掩码
+                mask = (white_image.astype(np.float32) - black_image.astype(np.float32)) > 10
+                
+                # 归一化处理
+                # 避免除以零
+                denominator = np.maximum(white_image.astype(np.float32) - 
+                               black_image.astype(np.float32), 1.0)
+                img_norm = np.divide(img_float, denominator, where=mask)
+                img_float = img_norm * 255.0  # 缩放回原范围
+                
+                # 应用掩码限制处理区域
+                img_float = np.where(mask, img_float, 0)
+                
+            I_processed.append(img_float)
+        
         # 将所有图像转换为浮点数类型，提高计算精度
-        I_float = [img.astype(np.float32) for img in I]
+        I_float = I_processed if I_processed else [img.astype(np.float32) for img in I]
         
         # 获取图像尺寸
         height, width = I_float[0].shape

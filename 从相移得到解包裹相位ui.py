@@ -33,6 +33,9 @@ class ReconstructionThread(QThread):
             if not os.path.exists(output_dir):
                 os.makedirs(output_dir)
 
+            # 加载全黑和全白图像（如果有）
+            black_image, white_image = self._load_black_white_images()
+
             # --- 水平解包裹流程 ---
             if mode in ['horizontal', 'both']:
                 self.progress_update.emit(5, "开始水平解包裹流程...")
@@ -42,12 +45,15 @@ class ReconstructionThread(QThread):
                 if images_h_unwrap and v_gray_images:
                     self.progress_update.emit(10, "[H] 计算包裹相位...")
                     wp_h = WrappedPhase(n=self.params['steps'])
-                    wrapped_phase_h = wp_h.computeWrappedphase(images_h_unwrap)
+                    wrapped_phase_h = wp_h.computeWrappedphase(images_h_unwrap, black_image, white_image)
                     wp_h.save_wrapped_phase(wrapped_phase_h, output_dir, "h_unwrap_from_v_fringe_", "vertical")
 
                     self.progress_update.emit(25, "[H] 解包裹相位...")
                     unwrapper_h = PhaseUnwrapper(n=self.params['gray_bits'], direction="horizontal")
-                    unwrapped_phase_h = unwrapper_h.unwrap_phase(wrapped_phase_h, v_gray_images, save_results=True, show_results=False, basename="horizontal_unwrapped")
+                    unwrapped_phase_h = unwrapper_h.unwrap_phase(wrapped_phase_h, v_gray_images, 
+                                                                black_image=black_image, white_image=white_image,
+                                                                save_results=True, show_results=False, 
+                                                                basename="horizontal_unwrapped")
                     results['h_unwrapped'] = unwrapped_phase_h
                 else:
                     raise ValueError("水平解包裹所需图像不完整。")
@@ -61,12 +67,15 @@ class ReconstructionThread(QThread):
                 if images_v_unwrap and h_gray_images:
                     self.progress_update.emit(55, "[V] 计算包裹相位...")
                     wp_v = WrappedPhase(n=self.params['steps'])
-                    wrapped_phase_v = wp_v.computeWrappedphase(images_v_unwrap)
+                    wrapped_phase_v = wp_v.computeWrappedphase(images_v_unwrap, black_image, white_image)
                     wp_v.save_wrapped_phase(wrapped_phase_v, output_dir, "v_unwrap_from_h_fringe_", "horizontal")
 
                     self.progress_update.emit(70, "[V] 解包裹相位...")
                     unwrapper_v = PhaseUnwrapper(n=self.params['gray_bits'], direction="vertical")
-                    unwrapped_phase_v = unwrapper_v.unwrap_phase(wrapped_phase_v, h_gray_images, save_results=True, show_results=False, basename="vertical_unwrapped")
+                    unwrapped_phase_v = unwrapper_v.unwrap_phase(wrapped_phase_v, h_gray_images, 
+                                                                black_image=black_image, white_image=white_image,
+                                                                save_results=True, show_results=False, 
+                                                                basename="vertical_unwrapped")
                     results['v_unwrapped'] = unwrapped_phase_v
                 else:
                     raise ValueError("垂直解包裹所需图像不完整。")
@@ -84,6 +93,35 @@ class ReconstructionThread(QThread):
             import traceback
             traceback.print_exc()
             self.processing_error.emit(str(e))
+
+    def _load_black_white_images(self):
+        """加载全黑全白图像"""
+        black_image = None
+        white_image = None
+
+        # 加载全黑图像
+        if 'black_image_path' in self.params and self.params['black_image_path']:
+            try:
+                black_path = self.params['black_image_path']
+                black_image = cv.imread(black_path, -1)
+                if black_image is not None and len(black_image.shape) > 2:
+                    black_image = cv.cvtColor(black_image, cv.COLOR_BGR2GRAY)
+                self.progress_update.emit(2, f"加载全黑图像: {os.path.basename(black_path)}")
+            except Exception as e:
+                self.progress_update.emit(2, f"加载全黑图像失败: {str(e)}")
+        
+        # 加载全白图像
+        if 'white_image_path' in self.params and self.params['white_image_path']:
+            try:
+                white_path = self.params['white_image_path']
+                white_image = cv.imread(white_path, -1)
+                if white_image is not None and len(white_image.shape) > 2:
+                    white_image = cv.cvtColor(white_image, cv.COLOR_BGR2GRAY)
+                self.progress_update.emit(4, f"加载全白图像: {os.path.basename(white_path)}")
+            except Exception as e:
+                self.progress_update.emit(4, f"加载全白图像失败: {str(e)}")
+        
+        return black_image, white_image
 
     def _load_images_from_folder(self, folder_path, expected_count=None):
         if not os.path.isdir(folder_path): return [], []
@@ -368,10 +406,18 @@ class Reconstruct3D_UI(QMainWindow):
         self.v_gray_path_edit.setToolTip("包含垂直格雷码图像的文件夹。\n这些图像用于辅助水平方向的相位解包裹。")
         self.h_gray_path_edit.setToolTip("包含水平格雷码图像的文件夹。\n这些图像用于辅助垂直方向的相位解包裹。")
         
+        # 添加全黑全白图像输入路径
+        black_white_group = QGroupBox("3. 全黑/全白图像 (可选)")
+        black_white_group.setToolTip("全黑图像用于环境光校正，全白图像用于反射率校正。\n这些图像可以提高解包裹相位的质量和鲁棒性。")
+        black_white_layout = QVBoxLayout(black_white_group)
+        self.black_image_path_edit = self._create_path_selector("全黑图像:", black_white_layout, allow_clear=True)
+        self.white_image_path_edit = self._create_path_selector("全白图像:", black_white_layout, allow_clear=True)
+        path_layout.addWidget(black_white_group)
+
         layout.addWidget(path_group)
 
         # Algorithm Parameters
-        param_group = QGroupBox("3. 算法参数")
+        param_group = QGroupBox("4. 算法参数")
         param_layout = QHBoxLayout(param_group)
         param_layout.addWidget(QLabel("相移步数:"))
         self.steps_spin = QSpinBox()
@@ -387,7 +433,7 @@ class Reconstruct3D_UI(QMainWindow):
         layout.addWidget(param_group)
         
         # Output Path
-        output_group = QGroupBox("4. 设置输出路径")
+        output_group = QGroupBox("5. 设置输出路径")
         output_layout = QVBoxLayout(output_group)
         self.output_path_edit = self._create_path_selector("输出根目录:", output_layout, "reconstruction_results")
         self.output_path_edit.setToolTip("所有中间和最终结果都将保存在此文件夹中。")
@@ -409,7 +455,7 @@ class Reconstruct3D_UI(QMainWindow):
         scroll.setWidget(panel)
         return scroll
 
-    def _create_path_selector(self, label_text, parent_layout, default_path=""):
+    def _create_path_selector(self, label_text, parent_layout, default_path="", allow_clear=False):
         row = QWidget()
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -419,6 +465,12 @@ class Reconstruct3D_UI(QMainWindow):
         button.clicked.connect(lambda: self._browse_folder(edit))
         layout.addWidget(edit)
         layout.addWidget(button)
+        
+        if allow_clear:
+            clear_button = QPushButton("清除")
+            clear_button.clicked.connect(lambda: edit.setText(""))
+            layout.addWidget(clear_button)
+            
         parent_layout.addWidget(row)
         return edit
 
@@ -616,6 +668,15 @@ class Reconstruct3D_UI(QMainWindow):
             'gray_bits': self.gray_bits_spin.value(),
             'output': self.output_path_edit.text()
         }
+
+        # 添加全黑全白图像路径
+        black_path = self.black_image_path_edit.text()
+        if black_path and os.path.isfile(black_path):
+            params['black_image_path'] = black_path
+        
+        white_path = self.white_image_path_edit.text()
+        if white_path and os.path.isfile(white_path):
+            params['white_image_path'] = white_path
 
         try: # Validate inputs before starting thread
             if not params['fringes_path'] or not params['output']: raise ValueError("请指定相移图像文件夹和输出目录。")

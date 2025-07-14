@@ -87,6 +87,28 @@ def run_full_pipeline(args):
         print(f"创建输出目录: {args.output}")
 
     unwrapped_phase_h, unwrapped_phase_v = None, None
+    
+    # 加载全黑和全白图像（如果有）
+    black_image = None
+    white_image = None
+    
+    if args.black_image and os.path.exists(args.black_image):
+        black_image = cv.imread(args.black_image, -1)
+        if black_image is not None:
+            if len(black_image.shape) > 2:
+                black_image = cv.cvtColor(black_image, cv.COLOR_BGR2GRAY)
+            print(f"成功加载全黑图像: {args.black_image}")
+        else:
+            print(f"警告: 无法加载全黑图像: {args.black_image}")
+    
+    if args.white_image and os.path.exists(args.white_image):
+        white_image = cv.imread(args.white_image, -1)
+        if white_image is not None:
+            if len(white_image.shape) > 2:
+                white_image = cv.cvtColor(white_image, cv.COLOR_BGR2GRAY)
+            print(f"成功加载全白图像: {args.white_image}")
+        else:
+            print(f"警告: 无法加载全白图像: {args.white_image}")
 
     # --- 执行水平解包裹流程 ---
     if args.mode in ['horizontal', 'both']:
@@ -95,13 +117,13 @@ def run_full_pipeline(args):
         print("="*40)
         
         # 1. 加载图像
-        images_for_h_unwrap, _ = load_and_split_fringe_images(args.fringes, args.steps)
+        images_h_unwrap, _ = load_and_split_fringe_images(args.fringes, args.steps)
         v_gray_images, _ = load_images_from_folder(args.v_graycodes, expected_count=args.gray_bits)
 
-        if images_for_h_unwrap and v_gray_images:
+        if images_h_unwrap and v_gray_images:
             # 2. 计算包裹相位
             wp_h = WrappedPhase(n=args.steps)
-            wrapped_phase_h = wp_h.computeWrappedphase(images_for_h_unwrap)
+            wrapped_phase_h = wp_h.computeWrappedphase(images_h_unwrap, black_image, white_image)
             wp_h.save_wrapped_phase(wrapped_phase_h, args.output, "h_unwrap_from_v_fringe_", direction="vertical")
             
             # 3. 解包裹相位
@@ -110,6 +132,7 @@ def run_full_pipeline(args):
             show_h_results = (args.mode == 'horizontal')
             unwrapped_phase_h = unwrapper_h.unwrap_phase(
                 wrapped_phase_h, v_gray_images, 
+                black_image=black_image, white_image=white_image,
                 show_results=show_h_results, 
                 save_results=True,  # 总是保存结果
                 basename="horizontal_unwrapped"
@@ -124,13 +147,13 @@ def run_full_pipeline(args):
         print("="*40)
 
         # 1. 加载图像
-        _, images_for_v_unwrap = load_and_split_fringe_images(args.fringes, args.steps)
+        _, images_v_unwrap = load_and_split_fringe_images(args.fringes, args.steps)
         h_gray_images, _ = load_images_from_folder(args.h_graycodes, expected_count=args.gray_bits)
 
-        if images_for_v_unwrap and h_gray_images:
+        if images_v_unwrap and h_gray_images:
             # 2. 计算包裹相位
             wp_v = WrappedPhase(n=args.steps)
-            wrapped_phase_v = wp_v.computeWrappedphase(images_for_v_unwrap)
+            wrapped_phase_v = wp_v.computeWrappedphase(images_v_unwrap, black_image, white_image)
             wp_v.save_wrapped_phase(wrapped_phase_v, args.output, "v_unwrap_from_h_fringe_", direction="horizontal")
 
             # 3. 解包裹相位
@@ -139,13 +162,14 @@ def run_full_pipeline(args):
             show_v_results = (args.mode == 'vertical')
             unwrapped_phase_v = unwrapper_v.unwrap_phase(
                 wrapped_phase_v, h_gray_images, 
+                black_image=black_image, white_image=white_image,
                 show_results=show_v_results, 
                 save_results=True,  # 总是保存结果
                 basename="vertical_unwrapped"
             )
         else:
             print("错误：垂直解包裹所需图像不完整，跳过此流程。")
-
+            
     # --- 合并结果 (仅在 both 模式下) ---
     if args.mode == 'both':
         print("\n" + "="*40)
@@ -185,6 +209,10 @@ if __name__ == "__main__":
     # --- 输出参数 ---
     parser.add_argument('--output', type=str, default='reconstruction_results', help="所有结果的输出根目录。默认为 'reconstruction_results'。")
     
+    # --- 全黑全白图像参数 (可选) ---
+    parser.add_argument('--black_image', type=str, help='全黑图像的路径，用于包裹相位计算。')
+    parser.add_argument('--white_image', type=str, help='全白图像的路径，用于包裹相位计算。')
+
     args = parser.parse_args()
 
     # --- 检查是否进入交互模式 ---
